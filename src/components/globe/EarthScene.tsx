@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useAppStore, useFlightStore, useSatelliteStore } from '@/stores/stores';
-import { latLonToVec3, greatCircleArc, getSunPosition } from '@/lib/data';
+import { latLonToVec3, greatCircleArc, getSunPosition, AIRPORTS } from '@/lib/data';
 
 const EARTH_RADIUS = 5;
 
@@ -342,17 +342,22 @@ const earthFragmentShader = `
     vec3 normal = normalize(vNormal);
     float sunDot = dot(normal, normalize(uSunDirection));
     float dayFactor = smoothstep(-0.15, 0.2, sunDot);
-    vec4 dayColor = texture2D(uDayMap, vUv);
-    vec4 nightColor = texture2D(uNightMap, vUv);
+    vec4 dayTex = texture2D(uDayMap, vUv);
+    vec4 nightTex = texture2D(uNightMap, vUv);
+    
     // Enhance day side with diffuse lighting
     float diffuse = max(0.0, sunDot);
-    dayColor.rgb *= 0.6 + diffuse * 0.6;
+    vec3 dayColor = dayTex.rgb * (0.6 + diffuse * 0.6);
+    
     // Night lights glow
-    nightColor.rgb *= 1.8;
-    // Add soft ambient geography to the night side so continents and oceans are clearly visible
-    vec3 nightAmbient = dayColor.rgb * vec3(0.18, 0.24, 0.38);
-    vec3 nightSide = nightColor.rgb + nightAmbient;
-    vec4 finalColor = mix(vec4(nightSide, 1.0), dayColor, dayFactor);
+    vec3 nightLights = nightTex.rgb * 1.8;
+    
+    // Ambient night geography using raw day texture (bright enough to distinguish continents and oceans)
+    vec3 nightAmbient = dayTex.rgb * vec3(0.5, 0.58, 0.75) * 1.25;
+    vec3 nightSide = nightLights + nightAmbient;
+    
+    vec4 finalColor = mix(vec4(nightSide, 1.0), vec4(dayColor, 1.0), dayFactor);
+    
     // Add subtle blue tint to terminator
     float terminator = 1.0 - abs(sunDot);
     terminator = pow(terminator, 8.0);
@@ -471,13 +476,23 @@ function AircraftLayer() {
   const aircraft = useFlightStore(s => s.aircraft);
   const showFlights = useAppStore(s => s.showFlights);
   const selectAircraft = useAppStore(s => s.selectAircraft);
+  const setViewTarget = useAppStore(s => s.setViewTarget);
   const selectedId = useAppStore(s => s.selectedAircraftId);
   const realisticColors = useAppStore(s => s.realisticColors);
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const clickMeshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const { camera } = useThree();
   
   const airplaneGeom = useMemo(() => createAirplaneGeometry(), []);
+  const clickGeom = useMemo(() => new THREE.SphereGeometry(1.5, 8, 8), []);
+
+  useEffect(() => {
+    return () => {
+      airplaneGeom.dispose();
+      clickGeom.dispose();
+    };
+  }, [airplaneGeom, clickGeom]);
 
   const filteredAircraft = useMemo(() =>
     showFlights ? aircraft.slice(0, 500) : [],
@@ -488,7 +503,7 @@ function AircraftLayer() {
     const count = filteredAircraft.length;
     // Camera-distance-adaptive scaling: bigger when zoomed out
     const camDist = camera.position.length();
-    const zoomFactor = Math.max(0.8, Math.min(3.0, camDist / (EARTH_RADIUS * 2)));
+    const zoomFactor = Math.max(1.0, Math.min(5.5, camDist / (EARTH_RADIUS * 1.5)));
     
     for (let i = 0; i < count; i++) {
       const ac = filteredAircraft[i];
@@ -524,15 +539,18 @@ function AircraftLayer() {
         .normalize();
       const vRight = new THREE.Vector3().crossVectors(vHeading, uNormal).normalize();
 
+      // No negation so planes point forward along heading trajectory
       const rotationMatrix = new THREE.Matrix4();
       rotationMatrix.makeBasis(vRight, vHeading, uNormal);
       dummy.rotation.setFromRotationMatrix(rotationMatrix);
 
-      // Slightly larger scale for high-visibility plane geometry
-      const baseScale = ac.id === selectedId ? 0.12 : 0.07;
+      // Increased scale for better visual design and clear appearance
+      const baseScale = ac.id === selectedId ? 0.24 : 0.14;
       dummy.scale.setScalar(baseScale * zoomFactor);
       dummy.updateMatrix();
+      
       meshRef.current.setMatrixAt(i, dummy.matrix);
+      if (clickMeshRef.current) clickMeshRef.current.setMatrixAt(i, dummy.matrix);
 
       // Altitude color coding or Realistic styling
       let color;
@@ -555,29 +573,45 @@ function AircraftLayer() {
     if (meshRef.current.instanceColor) {
       meshRef.current.instanceColor.needsUpdate = true;
     }
+    if (clickMeshRef.current) {
+      clickMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
   });
 
   if (filteredAircraft.length === 0) return null;
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[airplaneGeom, undefined, filteredAircraft.length]}
-      onClick={(e) => {
-        e.stopPropagation();
-        const idx = e.instanceId;
-        if (idx !== undefined && filteredAircraft[idx]) {
-          selectAircraft(filteredAircraft[idx].id);
-        }
-      }}
-    >
-      <instancedBufferAttribute
-        key={filteredAircraft.length}
-        attach="instanceColor"
-        args={[new Float32Array(filteredAircraft.length * 3).fill(1), 3]}
-      />
-      <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} />
-    </instancedMesh>
+    <group>
+      {/* Visual Mesh */}
+      <instancedMesh
+        ref={meshRef}
+        args={[airplaneGeom, undefined, filteredAircraft.length]}
+      >
+        <instancedBufferAttribute
+          key={filteredAircraft.length}
+          attach="instanceColor"
+          args={[new Float32Array(filteredAircraft.length * 3).fill(1), 3]}
+        />
+        <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} vertexColors />
+      </instancedMesh>
+
+      {/* Click Interaction Mesh (Invisible but clickable spheres) */}
+      <instancedMesh
+        ref={clickMeshRef}
+        args={[clickGeom, undefined, filteredAircraft.length]}
+        onClick={(e) => {
+          e.stopPropagation();
+          const idx = e.instanceId;
+          if (idx !== undefined && filteredAircraft[idx]) {
+            const ac = filteredAircraft[idx];
+            selectAircraft(ac.id);
+            setViewTarget({ lat: ac.latitude, lon: ac.longitude, entityId: ac.id, entityType: 'aircraft' });
+          }
+        }}
+      >
+        <meshBasicMaterial toneMapped={false} transparent opacity={0} depthWrite={false} />
+      </instancedMesh>
+    </group>
   );
 }
 
@@ -588,35 +622,122 @@ function FlightRoutes() {
   const aircraft = useFlightStore(s => s.aircraft);
   const selectedId = useAppStore(s => s.selectedAircraftId);
 
-  const routeGeometry = useMemo(() => {
+  const lineObject = useMemo(() => {
     if (!selectedId) return null;
-    // Show a few routes for visual interest
-    const routeAircraft = selectedId
-      ? aircraft.filter(a => a.id === selectedId)
-      : aircraft.slice(0, 20);
+    const selectedAircraft = aircraft.find(a => a.id === selectedId);
+    if (!selectedAircraft) return null;
+
+    // Parse airport codes
+    const originCode = selectedAircraft.origin.substring(0, 3);
+    const destCode = selectedAircraft.destination.substring(0, 3);
+    const originAirport = AIRPORTS[originCode];
+    const destAirport = AIRPORTS[destCode];
+
+    if (!originAirport || !destAirport) return null;
 
     const allPoints: THREE.Vector3[] = [];
-    for (const ac of routeAircraft) {
-      // Create arc from approximate origin to current position
-      const originLat = ac.latitude + (Math.sin(parseInt(ac.id.slice(2)) * 0.1) * 20);
-      const originLon = ac.longitude + (Math.cos(parseInt(ac.id.slice(2)) * 0.1) * 30);
-      const arcPts = greatCircleArc(originLat, originLon, ac.latitude, ac.longitude, EARTH_RADIUS * 1.003, 48, 0.15);
-      arcPts.forEach(p => allPoints.push(new THREE.Vector3(p[0], p[1], p[2])));
-      allPoints.push(new THREE.Vector3(NaN, NaN, NaN)); // break
-    }
+    const arcPts = greatCircleArc(
+      originAirport.lat, originAirport.lon,
+      destAirport.lat, destAirport.lon,
+      EARTH_RADIUS * 1.003, 64, 0.12
+    );
+    arcPts.forEach(p => allPoints.push(new THREE.Vector3(p[0], p[1], p[2])));
 
     if (allPoints.length === 0) return null;
     const geom = new THREE.BufferGeometry().setFromPoints(allPoints);
     geom.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), EARTH_RADIUS * 2.5);
-    return geom;
+    const mat = new THREE.LineBasicMaterial({ color: '#00d4ff', transparent: true, opacity: 0.7 });
+    return new THREE.Line(geom, mat);
   }, [selectedId, aircraft]);
 
-  if (!routeGeometry) return null;
+  // Clean up material and geometry on change/unmount
+  useEffect(() => {
+    return () => {
+      if (lineObject) {
+        lineObject.geometry.dispose();
+        lineObject.material.dispose();
+      }
+    };
+  }, [lineObject]);
+
+  if (!lineObject) return null;
+
+  return <primitive object={lineObject} />;
+}
+
+/* ================================================================
+   SELECTED FLIGHT MARKERS (Origin & Destination airports)
+   ================================================================ */
+function SelectedFlightMarkers() {
+  const aircraft = useFlightStore(s => s.aircraft);
+  const selectedId = useAppStore(s => s.selectedAircraftId);
+
+  const markers = useMemo(() => {
+    if (!selectedId) return null;
+    const ac = aircraft.find(a => a.id === selectedId);
+    if (!ac) return null;
+
+    const originCode = ac.origin.substring(0, 3);
+    const destCode = ac.destination.substring(0, 3);
+    const originAirport = AIRPORTS[originCode];
+    const destAirport = AIRPORTS[destCode];
+
+    if (!originAirport || !destAirport) return null;
+
+    return {
+      origin: {
+        pos: latLonToVec3(originAirport.lat, originAirport.lon, EARTH_RADIUS * 1.002),
+        code: originCode,
+      },
+      dest: {
+        pos: latLonToVec3(destAirport.lat, destAirport.lon, EARTH_RADIUS * 1.002),
+        code: destCode,
+      }
+    };
+  }, [selectedId, aircraft]);
+
+  if (!markers) return null;
 
   return (
-    <lineSegments geometry={routeGeometry}>
-      <lineBasicMaterial color="#00d4ff" transparent opacity={0.5} />
-    </lineSegments>
+    <group>
+      {/* Origin Marker */}
+      <mesh position={markers.origin.pos}>
+        <sphereGeometry args={[0.035, 16, 16]} />
+        <meshBasicMaterial color="#00ff88" toneMapped={false} />
+      </mesh>
+      <Html position={markers.origin.pos} center distanceFactor={12} zIndexRange={[100, 0]}>
+        <div style={{
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(4px)',
+          border: '1px solid #00ff88',
+          borderRadius: '4px', padding: '2px 6px',
+          color: '#00ff88', fontSize: '9px', fontWeight: 700,
+          fontFamily: 'sans-serif', whiteSpace: 'nowrap',
+          boxShadow: '0 0 8px rgba(0, 255, 136, 0.4)',
+        }}>
+          DEP: {markers.origin.code}
+        </div>
+      </Html>
+
+      {/* Destination Marker */}
+      <mesh position={markers.dest.pos}>
+        <sphereGeometry args={[0.035, 16, 16]} />
+        <meshBasicMaterial color="#ff4d4d" toneMapped={false} />
+      </mesh>
+      <Html position={markers.dest.pos} center distanceFactor={12} zIndexRange={[100, 0]}>
+        <div style={{
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(4px)',
+          border: '1px solid #ff4d4d',
+          borderRadius: '4px', padding: '2px 6px',
+          color: '#ff4d4d', fontSize: '9px', fontWeight: 700,
+          fontFamily: 'sans-serif', whiteSpace: 'nowrap',
+          boxShadow: '0 0 8px rgba(255, 77, 77, 0.4)',
+        }}>
+          ARR: {markers.dest.code}
+        </div>
+      </Html>
+    </group>
   );
 }
 
@@ -629,13 +750,23 @@ function SatelliteLayer() {
   const showStarlink = useAppStore(s => s.showStarlink);
   const showISS = useAppStore(s => s.showISS);
   const selectSatellite = useAppStore(s => s.selectSatellite);
+  const setViewTarget = useAppStore(s => s.setViewTarget);
   const selectedId = useAppStore(s => s.selectedSatelliteId);
   const realisticColors = useAppStore(s => s.realisticColors);
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const clickMeshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const { camera } = useThree();
 
   const satelliteGeom = useMemo(() => createSatelliteGeometry(), []);
+  const clickGeom = useMemo(() => new THREE.SphereGeometry(1.5, 8, 8), []);
+
+  useEffect(() => {
+    return () => {
+      satelliteGeom.dispose();
+      clickGeom.dispose();
+    };
+  }, [satelliteGeom, clickGeom]);
 
   const visibleSats = useMemo(() => {
     if (!showSatellites) return [];
@@ -651,7 +782,7 @@ function SatelliteLayer() {
     const t = Date.now() / 1000;
     // Camera-distance-adaptive scaling
     const camDist = camera.position.length();
-    const zoomFactor = Math.max(0.8, Math.min(3.0, camDist / (EARTH_RADIUS * 2)));
+    const zoomFactor = Math.max(1.0, Math.min(5.5, camDist / (EARTH_RADIUS * 1.5)));
 
     for (let i = 0; i < visibleSats.length; i++) {
       const sat = visibleSats[i];
@@ -669,10 +800,12 @@ function SatelliteLayer() {
       dummy.lookAt(0, 0, 0);
       
       const isISS = sat.category === 'iss';
-      const baseScale = isISS ? 0.08 : sat.category === 'starlink' ? 0.025 : 0.05;
+      const baseScale = isISS ? 0.24 : sat.category === 'starlink' ? 0.08 : 0.15;
       dummy.scale.setScalar(baseScale * zoomFactor);
       dummy.updateMatrix();
+      
       meshRef.current.setMatrixAt(i, dummy.matrix);
+      if (clickMeshRef.current) clickMeshRef.current.setMatrixAt(i, dummy.matrix);
 
       // Color by category or Realistic styling
       const color = new THREE.Color();
@@ -700,29 +833,47 @@ function SatelliteLayer() {
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
     if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
+    if (clickMeshRef.current) {
+      clickMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
   });
 
   if (visibleSats.length === 0) return null;
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[satelliteGeom, undefined, visibleSats.length]}
-      onClick={(e) => {
-        e.stopPropagation();
-        const idx = e.instanceId;
-        if (idx !== undefined && visibleSats[idx]) {
-          selectSatellite(visibleSats[idx].id);
-        }
-      }}
-    >
-      <instancedBufferAttribute
-        key={visibleSats.length}
-        attach="instanceColor"
-        args={[new Float32Array(visibleSats.length * 3).fill(1), 3]}
-      />
-      <meshBasicMaterial toneMapped={false} />
-    </instancedMesh>
+    <group>
+      {/* Visual Mesh */}
+      <instancedMesh
+        ref={meshRef}
+        args={[satelliteGeom, undefined, visibleSats.length]}
+      >
+        <instancedBufferAttribute
+          key={visibleSats.length}
+          attach="instanceColor"
+          args={[new Float32Array(visibleSats.length * 3).fill(1), 3]}
+        />
+        <meshBasicMaterial toneMapped={false} vertexColors />
+      </instancedMesh>
+
+      {/* Click Interaction Mesh */}
+      <instancedMesh
+        ref={clickMeshRef}
+        args={[clickGeom, undefined, visibleSats.length]}
+        onClick={(e) => {
+          e.stopPropagation();
+          const idx = e.instanceId;
+          if (idx !== undefined && visibleSats[idx]) {
+            const sat = visibleSats[idx];
+            selectSatellite(sat.id);
+            const t = Date.now() / 1000;
+            const posAtT = getSatellitePositionAtTime(sat, t);
+            setViewTarget({ lat: posAtT.lat, lon: posAtT.lon, entityId: sat.id, entityType: 'satellite' });
+          }
+        }}
+      >
+        <meshBasicMaterial toneMapped={false} transparent opacity={0} depthWrite={false} />
+      </instancedMesh>
+    </group>
   );
 }
 
@@ -965,14 +1116,64 @@ function GroundTracks() {
 /* ================================================================
    CAMERA CONTROLLER
    ================================================================ */
+function getRouteMidpoint(lat1: number, lon1: number, lat2: number, lon2: number) {
+  let dLon = lon2 - lon1;
+  if (dLon > 180) dLon -= 360;
+  if (dLon < -180) dLon += 360;
+  const lat = (lat1 + lat2) / 2;
+  const lon = ((lon1 + dLon / 2 + 180) % 360) - 180;
+  return { lat, lon };
+}
+
 function CameraController() {
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
   const viewTarget = useAppStore(s => s.viewTarget);
+  const satellites = useSatelliteStore(s => s.satellites);
+  const aircraft = useFlightStore(s => s.aircraft);
 
   useEffect(() => {
     if (viewTarget && controlsRef.current) {
-      const pos = latLonToVec3(viewTarget.lat, viewTarget.lon, EARTH_RADIUS * 1.5);
+      let targetLat = viewTarget.lat;
+      let targetLon = viewTarget.lon;
+      let camRadius = EARTH_RADIUS * 2.5;
+
+      if (viewTarget.entityType === 'satellite') {
+        const sat = satellites.find(s => s.id === viewTarget.entityId);
+        if (sat) {
+          const altScale = EARTH_RADIUS + (sat.altitude / 6371) * EARTH_RADIUS * 0.6;
+          const satRadius = Math.min(altScale, EARTH_RADIUS * 2.5);
+          camRadius = satRadius * 1.5;
+        } else {
+          camRadius = EARTH_RADIUS * 2.6;
+        }
+      } else if (viewTarget.entityType === 'aircraft') {
+        const ac = aircraft.find(a => a.id === viewTarget.entityId);
+        if (ac) {
+          const originCode = ac.origin.substring(0, 3);
+          const destCode = ac.destination.substring(0, 3);
+          const originAirport = AIRPORTS[originCode];
+          const destAirport = AIRPORTS[destCode];
+          if (originAirport && destAirport) {
+            const midpoint = getRouteMidpoint(originAirport.lat, originAirport.lon, destAirport.lat, destAirport.lon);
+            targetLat = midpoint.lat;
+            targetLon = midpoint.lon;
+            
+            const p1 = latLonToVec3(originAirport.lat, originAirport.lon, EARTH_RADIUS);
+            const p2 = latLonToVec3(destAirport.lat, destAirport.lon, EARTH_RADIUS);
+            const dist = new THREE.Vector3(...p1).distanceTo(new THREE.Vector3(...p2));
+            const routeAngle = dist / EARTH_RADIUS;
+            // Frame the path cleanly: short paths zoom closer, long paths zoom further out
+            camRadius = EARTH_RADIUS * Math.max(2.6, Math.min(4.2, 1.8 + routeAngle * 1.5));
+          } else {
+            camRadius = EARTH_RADIUS * 2.8;
+          }
+        } else {
+          camRadius = EARTH_RADIUS * 2.8;
+        }
+      }
+
+      const pos = latLonToVec3(targetLat, targetLon, camRadius);
       const targetPos = new THREE.Vector3(pos[0], pos[1], pos[2]);
       targetPos.applyEuler(new THREE.Euler(0, -Math.PI / 2, 0.41));
 
@@ -990,7 +1191,7 @@ function CameraController() {
       }
       animate();
     }
-  }, [viewTarget, camera]);
+  }, [viewTarget, camera, satellites, aircraft]);
 
   return (
     <OrbitControls
@@ -1019,6 +1220,7 @@ function Scene() {
         <Earth sunRef={sunRef} />
         <AircraftLayer />
         <FlightRoutes />
+        <SelectedFlightMarkers />
         <SatelliteLayer />
         <SatelliteFootprints />
         <GroundTracks />
@@ -1039,8 +1241,25 @@ function Scene() {
    GLOBE CANVAS (exported)
    ================================================================ */
 export default function EarthScene() {
+  const activePanel = useAppStore(s => s.activePanel);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    setIsDesktop(window.innerWidth > 768);
+    const handleResize = () => setIsDesktop(window.innerWidth > 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isPanelOpen = activePanel !== 'none';
+  const shiftX = isDesktop && isPanelOpen ? '-210px' : '0px';
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
+    <div style={{
+      width: '100%', height: '100%', position: 'absolute', inset: 0,
+      transform: `translateX(${shiftX})`,
+      transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+    }}>
       <Canvas
         camera={{ position: [0, 0, EARTH_RADIUS * 3], fov: 45, near: 0.1, far: 1000 }}
         gl={{

@@ -91,7 +91,7 @@ const AIRLINES = [
   { code: 'VJT', name: 'VistaJet', type: 'business' },
 ];
 
-const AIRPORTS: Record<string, { lat: number; lon: number; name: string }> = {
+export const AIRPORTS: Record<string, { lat: number; lon: number; name: string }> = {
   JFK: { lat: 40.6413, lon: -73.7781, name: 'New York JFK' },
   LAX: { lat: 33.9425, lon: -118.4081, name: 'Los Angeles' },
   LHR: { lat: 51.4700, lon: -0.4543, name: 'London Heathrow' },
