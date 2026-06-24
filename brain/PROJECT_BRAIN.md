@@ -97,6 +97,9 @@ Simulated Data (lib/data.ts)
 3. **Instanced Rendering**: Aircraft and satellites use `InstancedMesh` for GPU-efficient rendering of 500+ objects.
 4. **Camera-Adaptive Scaling**: Object sizes scale with camera distance so they remain visible at all zoom levels.
 5. **Tilted Coordinate System**: All 3D objects are children of a rotation group with Earth's axial tilt applied.
+6. **CORS Texture Loading**: TextureLoader is configured with `.setCrossOrigin('anonymous')` to load high-resolution Blue Marble day/night/clouds textures without cross-origin blocks.
+7. **Night Ambient Geography**: The custom Earth fragment shader mixes a soft ambient daytime map into the night side. This ensures continents and oceans remain readable in the dark rather than appearing pitch black.
+8. **Mathematical Alignment**: The store's 2s update interval (`updateSatellitePositions` in `data.ts`) and the 3D renderer's smooth interpolation (`getSatellitePositionAtTime` in `EarthScene.tsx`) use the identical orbital math (phase, raan, and altitude/velocity), aligning stored coordinates and visual positions.
 
 ## 7. Build & Run
 
