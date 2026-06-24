@@ -50,32 +50,77 @@ function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
 function createAirplaneGeometry(): THREE.BufferGeometry {
   const geometries: THREE.BufferGeometry[] = [];
 
-  // Fuselage (Cylinder along Y axis)
-  const fuselage = new THREE.CylinderGeometry(0.04, 0.04, 0.8, 8);
+  // Main Fuselage (Cylinder)
+  const fuselage = new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8);
+  fuselage.translate(0, 0.05, 0);
   geometries.push(fuselage);
 
-  // Main wings (Box along X axis, translated forward slightly)
-  const wings = new THREE.BoxGeometry(0.8, 0.15, 0.02);
-  wings.translate(0, 0.1, 0);
-  geometries.push(wings);
+  // Nose Cone (Cone pointing forward/+Y)
+  const nose = new THREE.ConeGeometry(0.04, 0.15, 8);
+  nose.translate(0, 0.375, 0);
+  geometries.push(nose);
 
-  // Tailplane (Box along X axis, translated back)
-  const tail = new THREE.BoxGeometry(0.3, 0.06, 0.01);
-  tail.translate(0, -0.3, 0);
-  geometries.push(tail);
+  // Tail Cone (Cylinder tapering to back/-Y)
+  const tailCone = new THREE.CylinderGeometry(0.04, 0.015, 0.2, 8);
+  tailCone.translate(0, -0.3, 0);
+  geometries.push(tailCone);
 
-  // Vertical stabilizer (Box, sticking up along local Z axis)
-  const stabilizer = new THREE.BoxGeometry(0.01, 0.08, 0.12);
-  stabilizer.translate(0, -0.3, 0.06);
-  geometries.push(stabilizer);
+  // Left Wing (Swept back)
+  const wingLeft = new THREE.BoxGeometry(0.4, 0.12, 0.02);
+  wingLeft.translate(-0.2, 0, 0);
+  wingLeft.rotateZ(-Math.PI / 12); // -15 deg sweep
+  wingLeft.translate(0, 0.05, 0);
+  geometries.push(wingLeft);
+
+  // Right Wing (Swept back)
+  const wingRight = new THREE.BoxGeometry(0.4, 0.12, 0.02);
+  wingRight.translate(0.2, 0, 0);
+  wingRight.rotateZ(Math.PI / 12); // +15 deg sweep
+  wingRight.translate(0, 0.05, 0);
+  geometries.push(wingRight);
+
+  // Left Horizontal Stabilizer (Swept back)
+  const stabilizerLeft = new THREE.BoxGeometry(0.16, 0.06, 0.01);
+  stabilizerLeft.translate(-0.08, 0, 0);
+  stabilizerLeft.rotateZ(-Math.PI / 8);
+  stabilizerLeft.translate(0, -0.35, 0);
+  geometries.push(stabilizerLeft);
+
+  // Right Horizontal Stabilizer (Swept back)
+  const stabilizerRight = new THREE.BoxGeometry(0.16, 0.06, 0.01);
+  stabilizerRight.translate(0.08, 0, 0);
+  stabilizerRight.rotateZ(Math.PI / 8);
+  stabilizerRight.translate(0, -0.35, 0);
+  geometries.push(stabilizerRight);
+
+  // Vertical Stabilizer (Swept back)
+  const stabilizerVert = new THREE.BoxGeometry(0.01, 0.08, 0.14);
+  stabilizerVert.rotateX(-Math.PI / 8);
+  stabilizerVert.translate(0, -0.36, 0.07);
+  geometries.push(stabilizerVert);
+
+  // Engines
+  const engineLeft = new THREE.CylinderGeometry(0.018, 0.016, 0.12, 8);
+  engineLeft.translate(-0.14, 0.05, -0.04);
+  geometries.push(engineLeft);
+
+  const engineRight = new THREE.CylinderGeometry(0.018, 0.016, 0.12, 8);
+  engineRight.translate(0.14, 0.05, -0.04);
+  geometries.push(engineRight);
 
   const merged = mergeGeometries(geometries);
   
   // Clean up source geometries
   fuselage.dispose();
-  wings.dispose();
-  tail.dispose();
-  stabilizer.dispose();
+  nose.dispose();
+  tailCone.dispose();
+  wingLeft.dispose();
+  wingRight.dispose();
+  stabilizerLeft.dispose();
+  stabilizerRight.dispose();
+  stabilizerVert.dispose();
+  engineLeft.dispose();
+  engineRight.dispose();
 
   return merged;
 }
@@ -83,17 +128,54 @@ function createAirplaneGeometry(): THREE.BufferGeometry {
 function createSatelliteGeometry(): THREE.BufferGeometry {
   const geometries: THREE.BufferGeometry[] = [];
 
-  // Satellite Central Bus (Box)
-  const body = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+  // Satellite Central Bus (Cylinder)
+  const body = new THREE.CylinderGeometry(0.08, 0.08, 0.24, 8);
   geometries.push(body);
 
-  // Solar Panels (Box along X axis)
-  const panels = new THREE.BoxGeometry(1.0, 0.1, 0.02);
-  geometries.push(panels);
+  // Left Solar Panel (Box)
+  const panelLeft = new THREE.BoxGeometry(0.35, 0.12, 0.01);
+  panelLeft.translate(-0.28, 0, 0);
+  geometries.push(panelLeft);
+
+  // Right Solar Panel (Box)
+  const panelRight = new THREE.BoxGeometry(0.35, 0.12, 0.01);
+  panelRight.translate(0.28, 0, 0);
+  geometries.push(panelRight);
+
+  // Connector Rod Left
+  const rodLeft = new THREE.CylinderGeometry(0.01, 0.01, 0.12, 6);
+  rodLeft.rotateZ(Math.PI / 2);
+  rodLeft.translate(-0.14, 0, 0);
+  geometries.push(rodLeft);
+
+  // Connector Rod Right
+  const rodRight = new THREE.CylinderGeometry(0.01, 0.01, 0.12, 6);
+  rodRight.rotateZ(Math.PI / 2);
+  rodRight.translate(0.14, 0, 0);
+  geometries.push(rodRight);
+
+  // Dish Antenna (Cone pointing forward/+Z towards Earth)
+  const dish = new THREE.ConeGeometry(0.07, 0.07, 8);
+  dish.rotateX(Math.PI / 2);
+  dish.translate(0, 0, 0.14);
+  geometries.push(dish);
+
+  // Mast Antenna (Cylinder pointing backward/-Z)
+  const mast = new THREE.CylinderGeometry(0.006, 0.006, 0.12, 6);
+  mast.rotateX(Math.PI / 2);
+  mast.translate(0, 0, -0.16);
+  geometries.push(mast);
 
   const merged = mergeGeometries(geometries);
+  
   body.dispose();
-  panels.dispose();
+  panelLeft.dispose();
+  panelRight.dispose();
+  rodLeft.dispose();
+  rodRight.dispose();
+  dish.dispose();
+  mast.dispose();
+
   return merged;
 }
 
@@ -383,6 +465,7 @@ function AircraftLayer() {
   const showFlights = useAppStore(s => s.showFlights);
   const selectAircraft = useAppStore(s => s.selectAircraft);
   const selectedId = useAppStore(s => s.selectedAircraftId);
+  const realisticColors = useAppStore(s => s.realisticColors);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const { camera } = useThree();
@@ -444,12 +527,22 @@ function AircraftLayer() {
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
 
-      // Altitude color coding
-      const altNorm = Math.min(ac.altitude / 13000, 1);
-      const r = altNorm < 0.5 ? 0.0 : 1.0;
-      const g = altNorm < 0.5 ? 0.83 : 1.0 - (altNorm - 0.5) * 2;
-      const b = altNorm < 0.5 ? 1.0 : 0.2;
-      meshRef.current.setColorAt(i, new THREE.Color(r, g, b));
+      // Altitude color coding or Realistic styling
+      let color;
+      if (realisticColors) {
+        if (ac.id === selectedId) {
+          color = new THREE.Color('#00d4ff'); // highlighted cyan for selected aircraft
+        } else {
+          color = new THREE.Color('#ffffff'); // realistic white
+        }
+      } else {
+        const altNorm = Math.min(ac.altitude / 13000, 1);
+        const r = altNorm < 0.5 ? 0.0 : 1.0;
+        const g = altNorm < 0.5 ? 0.83 : 1.0 - (altNorm - 0.5) * 2;
+        const b = altNorm < 0.5 ? 1.0 : 0.2;
+        color = new THREE.Color(r, g, b);
+      }
+      meshRef.current.setColorAt(i, color);
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
     if (meshRef.current.instanceColor) {
@@ -476,7 +569,7 @@ function AircraftLayer() {
         attach="instanceColor"
         args={[new Float32Array(filteredAircraft.length * 3).fill(1), 3]}
       />
-      <meshBasicMaterial vertexColors toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} />
+      <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} />
     </instancedMesh>
   );
 }
@@ -507,6 +600,7 @@ function FlightRoutes() {
 
     if (allPoints.length === 0) return null;
     const geom = new THREE.BufferGeometry().setFromPoints(allPoints);
+    geom.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), EARTH_RADIUS * 2.5);
     return geom;
   }, [selectedId, aircraft]);
 
@@ -528,6 +622,8 @@ function SatelliteLayer() {
   const showStarlink = useAppStore(s => s.showStarlink);
   const showISS = useAppStore(s => s.showISS);
   const selectSatellite = useAppStore(s => s.selectSatellite);
+  const selectedId = useAppStore(s => s.selectedSatelliteId);
+  const realisticColors = useAppStore(s => s.realisticColors);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const { camera } = useThree();
@@ -571,17 +667,27 @@ function SatelliteLayer() {
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
 
-      // Color by category
+      // Color by category or Realistic styling
       const color = new THREE.Color();
-      switch (sat.category) {
-        case 'iss': color.set('#ff6b35'); break;
-        case 'starlink': color.set('#ffffff'); break;
-        case 'gps': color.set('#00ff88'); break;
-        case 'galileo': color.set('#3b82f6'); break;
-        case 'glonass': color.set('#ef4444'); break;
-        case 'weather': color.set('#f59e0b'); break;
-        case 'communication': color.set('#8b5cf6'); break;
-        default: color.set('#94a3b8'); break;
+      if (realisticColors) {
+        if (sat.id === selectedId) {
+          color.set('#ff6b35'); // highlight selected satellite (orange)
+        } else if (sat.category === 'starlink') {
+          color.set('#cbd5e1'); // silver-grey for Starlink
+        } else {
+          color.set('#ffd700'); // gold/metallic for other satellites
+        }
+      } else {
+        switch (sat.category) {
+          case 'iss': color.set('#ff6b35'); break;
+          case 'starlink': color.set('#ffffff'); break;
+          case 'gps': color.set('#00ff88'); break;
+          case 'galileo': color.set('#3b82f6'); break;
+          case 'glonass': color.set('#ef4444'); break;
+          case 'weather': color.set('#f59e0b'); break;
+          case 'communication': color.set('#8b5cf6'); break;
+          default: color.set('#94a3b8'); break;
+        }
       }
       meshRef.current.setColorAt(i, color);
     }
@@ -608,7 +714,7 @@ function SatelliteLayer() {
         attach="instanceColor"
         args={[new Float32Array(visibleSats.length * 3).fill(1), 3]}
       />
-      <meshBasicMaterial vertexColors toneMapped={false} />
+      <meshBasicMaterial toneMapped={false} />
     </instancedMesh>
   );
 }

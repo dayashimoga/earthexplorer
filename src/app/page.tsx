@@ -169,6 +169,7 @@ function LayerToggles() {
   const showISS = useAppStore(s => s.showISS);
   const showOrbits = useAppStore(s => s.showOrbits);
   const showWeather = useAppStore(s => s.showWeather);
+  const realisticColors = useAppStore(s => s.realisticColors);
 
   const layers = [
     { key: 'showFlights', label: 'Flights', icon: '✈️', active: showFlights },
@@ -177,6 +178,7 @@ function LayerToggles() {
     { key: 'showISS', label: 'ISS', icon: '🏠', active: showISS },
     { key: 'showOrbits', label: 'Orbits', icon: '⭕', active: showOrbits },
     { key: 'showWeather', label: 'Weather', icon: '☁️', active: showWeather },
+    { key: 'realisticColors', label: 'Realistic Style', icon: '🎨', active: realisticColors },
   ];
 
   return (

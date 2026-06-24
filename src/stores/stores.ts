@@ -21,6 +21,7 @@ interface AppState {
   showISS: boolean;
   timeScale: number;
   searchQuery: string;
+  realisticColors: boolean;
   setLoaded: (v: boolean) => void;
   setLoadProgress: (v: number) => void;
   setActivePanel: (p: ActivePanel) => void;
@@ -42,6 +43,7 @@ export const useAppStore = create<AppState>((set) => ({
   showLabels: true, showOrbits: true, showWeather: true,
   showFlights: true, showSatellites: true, showStarlink: false, showISS: true,
   timeScale: 1, searchQuery: '',
+  realisticColors: false,
   setLoaded: (v) => set({ loaded: v }),
   setLoadProgress: (v) => set({ loadProgress: v }),
   setActivePanel: (p) => set((s) => ({ activePanel: s.activePanel === p ? 'none' : p })),
