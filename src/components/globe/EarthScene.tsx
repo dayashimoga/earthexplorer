@@ -345,15 +345,15 @@ const earthFragmentShader = `
     vec4 dayTex = texture2D(uDayMap, vUv);
     vec4 nightTex = texture2D(uNightMap, vUv);
     
-    // Enhance day side with diffuse lighting
+    // Enhance day side with boosted diffuse lighting
     float diffuse = max(0.0, sunDot);
-    vec3 dayColor = dayTex.rgb * (0.6 + diffuse * 0.6);
+    vec3 dayColor = dayTex.rgb * (1.0 + diffuse * 0.6) * 1.5;
     
     // Night lights glow
     vec3 nightLights = nightTex.rgb * 1.8;
     
-    // Ambient night geography using raw day texture (bright enough to distinguish continents and oceans)
-    vec3 nightAmbient = dayTex.rgb * vec3(0.5, 0.58, 0.75) * 1.25;
+    // Boosted ambient night geography using raw day texture (highly visible)
+    vec3 nightAmbient = dayTex.rgb * vec3(0.6, 0.68, 0.85) * 1.6;
     vec3 nightSide = nightLights + nightAmbient;
     
     vec4 finalColor = mix(vec4(nightSide, 1.0), vec4(dayColor, 1.0), dayFactor);
@@ -592,7 +592,7 @@ function AircraftLayer() {
           attach="instanceColor"
           args={[new Float32Array(filteredAircraft.length * 3).fill(1), 3]}
         />
-        <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} vertexColors />
+        <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} />
       </instancedMesh>
 
       {/* Click Interaction Mesh (Invisible but clickable spheres) */}
@@ -852,7 +852,7 @@ function SatelliteLayer() {
           attach="instanceColor"
           args={[new Float32Array(visibleSats.length * 3).fill(1), 3]}
         />
-        <meshBasicMaterial toneMapped={false} vertexColors />
+        <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
 
       {/* Click Interaction Mesh */}
@@ -1132,14 +1132,45 @@ function CameraController() {
   const satellites = useSatelliteStore(s => s.satellites);
   const aircraft = useFlightStore(s => s.aircraft);
 
+  const satellitesRef = useRef(satellites);
+  const aircraftRef = useRef(aircraft);
+  satellitesRef.current = satellites;
+  aircraftRef.current = aircraft;
+
+  const lastTargetIdRef = useRef<string | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (viewTarget && controlsRef.current) {
+    if (!viewTarget) {
+      lastTargetIdRef.current = null;
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      return;
+    }
+
+    if (controlsRef.current) {
+      const targetId = `${viewTarget.entityType}-${viewTarget.entityId}-${viewTarget.lat}-${viewTarget.lon}`;
+      if (lastTargetIdRef.current === targetId) {
+        return; // Skip animation if target hasn't changed
+      }
+      lastTargetIdRef.current = targetId;
+
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+
       let targetLat = viewTarget.lat;
       let targetLon = viewTarget.lon;
       let camRadius = EARTH_RADIUS * 2.5;
 
+      const currentSats = satellitesRef.current;
+      const currentAircraft = aircraftRef.current;
+
       if (viewTarget.entityType === 'satellite') {
-        const sat = satellites.find(s => s.id === viewTarget.entityId);
+        const sat = currentSats.find(s => s.id === viewTarget.entityId);
         if (sat) {
           const altScale = EARTH_RADIUS + (sat.altitude / 6371) * EARTH_RADIUS * 0.6;
           const satRadius = Math.min(altScale, EARTH_RADIUS * 2.5);
@@ -1148,7 +1179,7 @@ function CameraController() {
           camRadius = EARTH_RADIUS * 2.6;
         }
       } else if (viewTarget.entityType === 'aircraft') {
-        const ac = aircraft.find(a => a.id === viewTarget.entityId);
+        const ac = currentAircraft.find(a => a.id === viewTarget.entityId);
         if (ac) {
           const originCode = ac.origin.substring(0, 3);
           const destCode = ac.destination.substring(0, 3);
@@ -1187,11 +1218,15 @@ function CameraController() {
         const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
         camera.position.lerpVectors(startPos, targetPos, eased);
         camera.lookAt(0, 0, 0);
-        if (t < 1) requestAnimationFrame(animate);
+        if (t < 1) {
+          animFrameRef.current = requestAnimationFrame(animate);
+        } else {
+          animFrameRef.current = null;
+        }
       }
       animate();
     }
-  }, [viewTarget, camera, satellites, aircraft]);
+  }, [viewTarget, camera]);
 
   return (
     <OrbitControls
