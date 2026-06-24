@@ -51,8 +51,8 @@ src/
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Earth Rendering (day/night/atmosphere/clouds) | ✅ | Custom GLSL shaders, CDN + procedural textures |
-| Aircraft Layer (400 simulated) | ✅ | Instanced 3D meshes, altitude coloring, camera-adaptive scaling |
-| Satellite Layer (120+ simulated) | ✅ | Instanced meshes, category coloring, real-time orbital motion |
+| Aircraft Layer (400 simulated) | ✅ | Instanced 3D meshes, altitude/realistic coloring, camera-adaptive scaling, detailed airliner geometry (fuselage, wings, engines) |
+| Satellite Layer (120+ simulated) | ✅ | Instanced meshes, category/realistic coloring, real-time orbital motion, detailed satellite geometry (body, solar panels, dish, mast) |
 | ISS Tracking | ✅ | Live position, HTML label, dedicated panel |
 | Orbit Rings (LEO/MEO/GEO) | ✅ | Line loops with labels |
 | Satellite Footprints | ✅ | Spherical cap geometry for selected satellite |
@@ -64,7 +64,7 @@ src/
 | Satellite Detail Panel | ✅ | Orbital parameters, NORAD ID, position, search filtering |
 | ISS Panel | ✅ | Position, quick facts, track button |
 | Weather Panel | ⚠️ | Toggle only, no globe visualization |
-| Layer Toggles | ✅ | 6 toggleable layers |
+| Layer Toggles | ✅ | 7 toggleable layers (including Realistic Style color mode) |
 | Mission System (5 missions) | ✅ | Multi-step with info/quiz/simulation, XP rewards |
 | Orbit Simulator Lab | ✅ | Interactive altitude slider with physics |
 | Rocket Lab | ✅ | Thrust/angle/fuel, physics simulation |
