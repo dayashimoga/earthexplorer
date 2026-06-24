@@ -69,9 +69,29 @@ export function HUD() {
   const satellites = useSatelliteStore(s => s.satellites);
   const searchQuery = useAppStore(s => s.searchQuery);
   const setSearchQuery = useAppStore(s => s.setSearchQuery);
+  const setActivePanel = useAppStore(s => s.setActivePanel);
+  const activePanel = useAppStore(s => s.activePanel);
   const userXP = useUserStore(s => s.xp);
   const userLevel = useUserStore(s => s.level);
   const streak = useUserStore(s => s.streak);
+
+  const handleSearch = (q: string) => {
+    setSearchQuery(q);
+    if (q.length >= 2) {
+      const ql = q.toLowerCase();
+      const flightMatch = aircraft.some(a =>
+        a.callsign.toLowerCase().includes(ql) || a.airline.toLowerCase().includes(ql) ||
+        a.flightNumber.toLowerCase().includes(ql) || a.origin.toLowerCase().includes(ql) ||
+        a.destination.toLowerCase().includes(ql)
+      );
+      const satMatch = satellites.some(s =>
+        s.name.toLowerCase().includes(ql) || s.category.toLowerCase().includes(ql) ||
+        s.id.toLowerCase().includes(ql)
+      );
+      if (flightMatch && activePanel !== 'flights') setActivePanel('flights');
+      else if (satMatch && !flightMatch && activePanel !== 'satellites') setActivePanel('satellites');
+    }
+  };
 
   return (
     <div className="hud-top">
@@ -79,7 +99,7 @@ export function HUD() {
         className="hud-search"
         placeholder="Search flights, satellites, locations..."
         value={searchQuery}
-        onChange={e => setSearchQuery(e.target.value)}
+        onChange={e => handleSearch(e.target.value)}
       />
       <div className="hud-badge" style={{ color: '#00d4ff' }}>
         <span>✈️</span> {aircraft.length}
@@ -280,6 +300,7 @@ function SatellitePanel() {
   const setViewTarget = useAppStore(s => s.setViewTarget);
   const toggleLayer = useAppStore(s => s.toggleLayer);
   const showStarlink = useAppStore(s => s.showStarlink);
+  const searchQuery = useAppStore(s => s.searchQuery);
   const [filterCategory, setFilterCategory] = useState<string>('all');
 
   const selectedSat = useMemo(() =>
@@ -294,8 +315,12 @@ function SatellitePanel() {
   const filtered = useMemo(() => {
     let f = satellites;
     if (filterCategory !== 'all') f = f.filter(s => s.category === filterCategory);
+    if (searchQuery.length >= 2) {
+      const q = searchQuery.toLowerCase();
+      f = f.filter(s => s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q) || s.orbitType.toLowerCase().includes(q));
+    }
     return f.slice(0, 50);
-  }, [satellites, filterCategory]);
+  }, [satellites, filterCategory, searchQuery]);
 
   if (selectedSat) {
     return (

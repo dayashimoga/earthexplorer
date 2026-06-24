@@ -290,6 +290,14 @@ export function LabPanel() {
     return <RocketLab onClose={() => setActiveLab(null)} />;
   }
 
+  if (activeLab === 'flight') {
+    return <FlightLab onClose={() => { setActiveLab(null); addXP(25); }} />;
+  }
+
+  if (activeLab === 'weather') {
+    return <WeatherLab onClose={() => { setActiveLab(null); addXP(25); }} />;
+  }
+
   return (
     <div>
       <div className="panel-header">
@@ -307,6 +315,216 @@ export function LabPanel() {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   FLIGHT LAB
+   ================================================================ */
+function FlightLab({ onClose }: { onClose: () => void }) {
+  const [speed, setSpeed] = useState(250); // m/s
+  const [altitude, setAltitude] = useState(10000); // meters
+  const addXP = useUserStore(s => s.addXP);
+
+  // Physics calculations
+  const airDensity = 1.225 * Math.exp(-altitude / 8500); // exponential atmosphere model
+  const machNumber = speed / (340 * Math.sqrt(Math.max(0.1, 1 - altitude / 44000)));
+  const liftCoeff = 0.3 + (speed > 100 ? 0.2 : 0);
+  const dragForce = 0.5 * airDensity * speed * speed * 0.02 * 150; // Cd * area * 0.5 * rho * v^2
+  const liftForce = 0.5 * airDensity * speed * speed * liftCoeff * 150;
+  const weight = 75000 * 9.81;
+  const canFly = liftForce > weight;
+  const stallSpeed = Math.sqrt((2 * weight) / (airDensity * liftCoeff * 150));
+  const range = (speed / Math.max(1, dragForce / 1000)) * 3600 * 15 / 1000; // simplified range in km
+
+  return (
+    <div>
+      <div className="panel-header">
+        <div className="panel-title">✈️ Flight Lab</div>
+        <button className="btn-icon" onClick={onClose}>✕</button>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+            <span style={{ color: '#94a3b8' }}>Airspeed</span>
+            <span style={{ color: '#00d4ff', fontFamily: 'JetBrains Mono' }}>{Math.round(speed * 3.6)} km/h ({speed} m/s)</span>
+          </div>
+          <input type="range" min={20} max={340} value={speed} onChange={e => setSpeed(Number(e.target.value))} style={{ width: '100%', accentColor: '#00d4ff' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
+            <span>72 km/h (taxi)</span><span>1,224 km/h (Mach 1)</span>
+          </div>
+        </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+            <span style={{ color: '#94a3b8' }}>Altitude</span>
+            <span style={{ color: '#7c3aed', fontFamily: 'JetBrains Mono' }}>{altitude.toLocaleString()} m (FL{Math.round(altitude * 3.28084 / 100)})</span>
+          </div>
+          <input type="range" min={0} max={18000} value={altitude} onChange={e => setAltitude(Number(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
+            <span>Sea level</span><span>18,000 m (FL590)</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 12 }}>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: machNumber > 0.85 ? '#ef4444' : '#00d4ff' }}>{machNumber.toFixed(2)}</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Mach #</div>
+        </div>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#7c3aed' }}>{airDensity.toFixed(3)}</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Air ρ (kg/m³)</div>
+        </div>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#f59e0b' }}>{Math.round(stallSpeed * 3.6)}</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Stall (km/h)</div>
+        </div>
+      </div>
+
+      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: canFly ? '#10b981' : '#ef4444' }}>{(liftForce / 1000).toFixed(1)} kN</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Lift Force</div>
+        </div>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#ef4444' }}>{(dragForce / 1000).toFixed(1)} kN</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Drag Force</div>
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 12, marginBottom: 12, textAlign: 'center' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: canFly ? '#10b981' : '#ef4444' }}>
+          {canFly ? '✅ Flight Sustained — Lift > Weight' : '❌ STALL — Increase speed or decrease altitude'}
+        </div>
+        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+          Est. range: {Math.round(range).toLocaleString()} km · Weight: {(weight / 1000).toFixed(0)} kN
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16 }}>
+        <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.7 }}>
+          <strong style={{ color: '#f1f5f9' }}>Key Insights:</strong><br/>
+          • Air density drops exponentially with altitude (scale height ~8.5 km)<br/>
+          • Higher altitude = less drag = better fuel efficiency, but harder to generate lift<br/>
+          • Stall speed increases with altitude as air thins<br/>
+          • Commercial jets cruise at FL350-FL410 for optimal drag/lift balance
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   WEATHER LAB
+   ================================================================ */
+function WeatherLab({ onClose }: { onClose: () => void }) {
+  const [pressure, setPressure] = useState(1013); // hPa
+  const [temperature, setTemperature] = useState(20); // °C
+  const [humidity, setHumidity] = useState(60); // %
+  const addXP = useUserStore(s => s.addXP);
+
+  // Physics calculations
+  const tempK = temperature + 273.15;
+  const airDensity = (pressure * 100) / (287.05 * tempK);
+  const dewPoint = temperature - ((100 - humidity) / 5);
+  const cloudBase = Math.max(0, (temperature - dewPoint) * 125); // meters
+  const satVaporPressure = 6.112 * Math.exp((17.67 * temperature) / (temperature + 243.5));
+  const actualVaporPressure = (humidity / 100) * satVaporPressure;
+  const isStormRisk = pressure < 1000 && humidity > 80 && temperature > 25;
+  const isFogRisk = Math.abs(temperature - dewPoint) < 2.5;
+  const windEstimate = Math.max(0, (1013 - pressure) * 2.5); // simplified pressure-gradient wind
+
+  const weatherType = pressure < 990 ? '🌀 Tropical Storm Risk'
+    : pressure < 1000 && humidity > 80 ? '🌧️ Heavy Rain / Thunderstorm'
+    : pressure < 1005 ? '🌦️ Rainy / Overcast'
+    : pressure < 1020 ? '⛅ Partly Cloudy'
+    : '☀️ Clear / Fair Weather';
+
+  return (
+    <div>
+      <div className="panel-header">
+        <div className="panel-title">🌪️ Weather Lab</div>
+        <button className="btn-icon" onClick={onClose}>✕</button>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+            <span style={{ color: '#94a3b8' }}>Pressure</span>
+            <span style={{ color: '#00d4ff', fontFamily: 'JetBrains Mono' }}>{pressure} hPa</span>
+          </div>
+          <input type="range" min={960} max={1050} value={pressure} onChange={e => setPressure(Number(e.target.value))} style={{ width: '100%', accentColor: '#00d4ff' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
+            <span>960 hPa (hurricane)</span><span>1050 hPa (strong high)</span>
+          </div>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+            <span style={{ color: '#94a3b8' }}>Temperature</span>
+            <span style={{ color: '#ef4444', fontFamily: 'JetBrains Mono' }}>{temperature}°C ({(temperature * 9/5 + 32).toFixed(0)}°F)</span>
+          </div>
+          <input type="range" min={-30} max={50} value={temperature} onChange={e => setTemperature(Number(e.target.value))} style={{ width: '100%', accentColor: '#ef4444' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
+            <span>-30°C (polar)</span><span>50°C (desert)</span>
+          </div>
+        </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+            <span style={{ color: '#94a3b8' }}>Humidity</span>
+            <span style={{ color: '#10b981', fontFamily: 'JetBrains Mono' }}>{humidity}%</span>
+          </div>
+          <input type="range" min={5} max={100} value={humidity} onChange={e => setHumidity(Number(e.target.value))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
+            <span>5% (desert)</span><span>100% (saturated)</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16, textAlign: 'center', marginBottom: 12, background: isStormRisk ? 'rgba(239,68,68,0.1)' : isFogRisk ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)' }}>
+        <div style={{ fontSize: 24, marginBottom: 4 }}>{weatherType.split(' ')[0]}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: isStormRisk ? '#ef4444' : isFogRisk ? '#f59e0b' : '#10b981' }}>
+          {weatherType.split(' ').slice(1).join(' ')}
+        </div>
+        {isFogRisk && <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 4 }}>⚠️ Fog/Mist likely (Dew point ≈ Temperature)</div>}
+      </div>
+
+      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 12 }}>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#00d4ff' }}>{dewPoint.toFixed(1)}°</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Dew Point</div>
+        </div>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#7c3aed' }}>{cloudBase.toLocaleString()} m</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Cloud Base</div>
+        </div>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#f59e0b' }}>{Math.round(windEstimate)}</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Wind (km/h)</div>
+        </div>
+      </div>
+
+      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#10b981' }}>{airDensity.toFixed(3)}</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Air ρ (kg/m³)</div>
+        </div>
+        <div className="stat-card" style={{ padding: 12 }}>
+          <div className="stat-value" style={{ fontSize: 16, color: '#ef4444' }}>{actualVaporPressure.toFixed(1)}</div>
+          <div className="stat-label" style={{ fontSize: 10 }}>Vapor P (hPa)</div>
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16 }}>
+        <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.7 }}>
+          <strong style={{ color: '#f1f5f9' }}>Key Insights:</strong><br/>
+          • Low pressure = stormy weather; high pressure = clear skies<br/>
+          • When temp ≈ dew point, fog/clouds form (air is saturated)<br/>
+          • Cloud base height = (Temp − Dew Point) × 125 meters<br/>
+          • Hurricanes form when pressure drops below ~990 hPa over warm water (&gt;26.5°C)
+        </div>
       </div>
     </div>
   );

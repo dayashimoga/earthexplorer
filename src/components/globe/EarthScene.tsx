@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useMemo, useEffect, useState } from 'react';
+import React, { useRef, useMemo, useEffect, useState, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -339,7 +339,8 @@ function Earth({ sunRef }: { sunRef: React.RefObject<THREE.DirectionalLight> }) 
     if (uniformsRef.current) uniformsRef.current.uSunDirection.value.copy(worldDir);
     if (atmUniformsRef.current) atmUniformsRef.current.uSunDirection.value.copy(worldDir);
     if (sunRef.current) sunRef.current.position.copy(worldDir.clone().multiplyScalar(50));
-    if (cloudsRef.current) cloudsRef.current.rotation.y += 0.00003;
+    if (cloudsRef.current) cloudsRef.current.rotation.y += 0.0003;
+    if (meshRef.current) meshRef.current.rotation.y += 0.0001;
   });
 
   return (
@@ -384,6 +385,7 @@ function AircraftLayer() {
   const selectedId = useAppStore(s => s.selectedAircraftId);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const { camera } = useThree();
   
   const airplaneGeom = useMemo(() => createAirplaneGeometry(), []);
 
@@ -394,6 +396,9 @@ function AircraftLayer() {
   useFrame(() => {
     if (!meshRef.current || filteredAircraft.length === 0) return;
     const count = filteredAircraft.length;
+    // Camera-distance-adaptive scaling: bigger when zoomed out
+    const camDist = camera.position.length();
+    const zoomFactor = Math.max(0.8, Math.min(3.0, camDist / (EARTH_RADIUS * 2)));
     
     for (let i = 0; i < count; i++) {
       const ac = filteredAircraft[i];
@@ -434,7 +439,8 @@ function AircraftLayer() {
       dummy.rotation.setFromRotationMatrix(rotationMatrix);
 
       // Slightly larger scale for high-visibility plane geometry
-      dummy.scale.setScalar(ac.id === selectedId ? 0.08 : 0.04);
+      const baseScale = ac.id === selectedId ? 0.12 : 0.07;
+      dummy.scale.setScalar(baseScale * zoomFactor);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
 
@@ -470,7 +476,7 @@ function AircraftLayer() {
         attach="instanceColor"
         args={[new Float32Array(filteredAircraft.length * 3).fill(1), 3]}
       />
-      <meshBasicMaterial vertexColors toneMapped={false} side={THREE.DoubleSide} />
+      <meshBasicMaterial vertexColors toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.95} />
     </instancedMesh>
   );
 }
@@ -524,6 +530,7 @@ function SatelliteLayer() {
   const selectSatellite = useAppStore(s => s.selectSatellite);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const { camera } = useThree();
 
   const satelliteGeom = useMemo(() => createSatelliteGeometry(), []);
 
@@ -539,6 +546,9 @@ function SatelliteLayer() {
   useFrame(() => {
     if (!meshRef.current || visibleSats.length === 0) return;
     const t = Date.now() / 1000;
+    // Camera-distance-adaptive scaling
+    const camDist = camera.position.length();
+    const zoomFactor = Math.max(0.8, Math.min(3.0, camDist / (EARTH_RADIUS * 2)));
 
     for (let i = 0; i < visibleSats.length; i++) {
       const sat = visibleSats[i];
@@ -556,7 +566,8 @@ function SatelliteLayer() {
       dummy.lookAt(0, 0, 0);
       
       const isISS = sat.category === 'iss';
-      dummy.scale.setScalar(isISS ? 0.06 : sat.category === 'starlink' ? 0.015 : 0.03);
+      const baseScale = isISS ? 0.08 : sat.category === 'starlink' ? 0.025 : 0.05;
+      dummy.scale.setScalar(baseScale * zoomFactor);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
 
