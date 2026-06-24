@@ -191,7 +191,10 @@ function getSatellitePositionAtTime(sat: any, t: number): { lat: number; lon: nu
     const angularVel = 360 / (sat.period * 60); // deg/s
     const trueAnomaly = (sat.phase + angularVel * t) % 360;
     lat = sat.inclination * Math.sin(trueAnomaly * Math.PI / 180);
-    lon = (sat.raan + trueAnomaly - (t * 0.00417)) % 360 - 180;
+    let wrappedLon = (sat.raan + trueAnomaly - (t * 0.00417)) % 360;
+    if (wrappedLon > 180) wrappedLon -= 360;
+    if (wrappedLon < -180) wrappedLon += 360;
+    lon = wrappedLon;
   }
   return { lat, lon };
 }
@@ -346,7 +349,10 @@ const earthFragmentShader = `
     dayColor.rgb *= 0.6 + diffuse * 0.6;
     // Night lights glow
     nightColor.rgb *= 1.8;
-    vec4 finalColor = mix(nightColor, dayColor, dayFactor);
+    // Add soft ambient geography to the night side so continents and oceans are clearly visible
+    vec3 nightAmbient = dayColor.rgb * vec3(0.18, 0.24, 0.38);
+    vec3 nightSide = nightColor.rgb + nightAmbient;
+    vec4 finalColor = mix(vec4(nightSide, 1.0), dayColor, dayFactor);
     // Add subtle blue tint to terminator
     float terminator = 1.0 - abs(sunDot);
     terminator = pow(terminator, 8.0);
@@ -391,6 +397,7 @@ function Earth({ sunRef }: { sunRef: React.RefObject<THREE.DirectionalLight> }) 
   // Attempt remote texture upgrade (never crashes)
   useEffect(() => {
     const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
     const configure = (tex: THREE.Texture) => { tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; };
 
     loader.load(TEXTURE_URLS.day, (tex) => {

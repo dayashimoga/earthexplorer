@@ -237,16 +237,24 @@ export function generateSimulatedSatellites(): Satellite[] {
 
 // Update satellite positions based on time
 export function updateSatellitePositions(satellites: Satellite[], deltaMs: number): Satellite[] {
-  const deltaSec = deltaMs / 1000;
+  const t = Date.now() / 1000;
   return satellites.map(sat => {
-    const angularVel = 360 / (sat.period * 60);
-    const dAngle = angularVel * deltaSec;
-    const t = Date.now() / 1000;
-    const newLat = sat.inclination * Math.sin((t * angularVel * Math.PI) / 180);
-    let newLon = sat.longitude + dAngle - (deltaSec * 0.00417 * (360 / 86164));
-    if (newLon > 180) newLon -= 360;
-    if (newLon < -180) newLon += 360;
-    return { ...sat, latitude: newLat, longitude: newLon };
+    let lat = sat.latitude;
+    let lon = sat.longitude;
+    
+    if (sat.category === 'iss') {
+      lon = ((t * 0.0667) % 360) - 180;
+      lat = 51.6 * Math.sin(t * 0.0011);
+    } else if (sat.phase !== undefined && sat.raan !== undefined) {
+      const angularVel = 360 / (sat.period * 60); // deg/s
+      const trueAnomaly = (sat.phase + angularVel * t) % 360;
+      lat = sat.inclination * Math.sin(trueAnomaly * Math.PI / 180);
+      let wrappedLon = (sat.raan + trueAnomaly - (t * 0.00417)) % 360;
+      if (wrappedLon > 180) wrappedLon -= 360;
+      if (wrappedLon < -180) wrappedLon += 360;
+      lon = wrappedLon;
+    }
+    return { ...sat, latitude: lat, longitude: lon };
   });
 }
 
