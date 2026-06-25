@@ -37,6 +37,9 @@ export interface Satellite {
   visible: boolean;
   phase?: number;
   raan?: number;
+  eccentricity?: number;
+  argPerigee?: number;
+  orbitAltitude?: number;
 }
 
 export type SatelliteCategory =

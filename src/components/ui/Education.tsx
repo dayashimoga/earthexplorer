@@ -64,7 +64,10 @@ export function MissionPanel() {
       <div>
         <div className="panel-header">
           <div className="panel-title">{activeMission.icon} {activeMission.title}</div>
-          <button className="btn-icon" onClick={() => setActiveMission(null)}>✕</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-icon" title="Back to List" onClick={() => setActiveMission(null)}>←</button>
+            <button className="btn-icon" title="Close Panel" onClick={() => { setActiveMission(null); useAppStore.getState().setActivePanel('none'); }}>✕</button>
+          </div>
         </div>
 
         {/* Progress */}
@@ -144,7 +147,10 @@ export function MissionPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🎯 Missions</div>
-        <div style={{ fontSize: 13, color: '#94a3b8' }}>{completedMissions.length}/{MISSIONS.length}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>{completedMissions.length}/{MISSIONS.length}</div>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -188,63 +194,152 @@ export function MissionPanel() {
    ORBIT SIMULATOR (used in missions & labs)
    ================================================================ */
 function OrbitSimulator({ config }: { config?: any }) {
-  const [altitude, setAltitude] = useState(400);
+  const [altitude, setAltitude] = useState(400); // km
+  const [eccentricity, setEccentricity] = useState(0.05);
+  const [inclination, setInclination] = useState(28.5);
+
   const period = orbitalPeriod(altitude);
   const velocity = orbitalVelocity(altitude);
   const escape = escapeVelocity(altitude);
+
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    let time = 0;
+
+    const render = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      // Draw grid
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
+      ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
+      ctx.stroke();
+
+      // Earth radius = 6371 km
+      // Scale: 6371 km = 35 pixels
+      const scale = 35 / 6371;
+
+      // Semi-major axis
+      const Rp = 6371 + altitude; // Perigee distance
+      const a = Rp / (1 - eccentricity); // Semi-major axis
+      const b = a * Math.sqrt(1 - eccentricity * eccentricity);
+      const c = a * eccentricity; // focus distance
+
+      const apix = a * scale;
+      const bpix = b * scale;
+      const cpix = c * scale;
+
+      // Earth is at focus (cx - cpix, cy)
+      ctx.beginPath();
+      ctx.arc(cx - cpix, cy, 35, 0, Math.PI * 2);
+      const grad = ctx.createRadialGradient(cx - cpix - 8, cy - 8, 4, cx - cpix, cy, 35);
+      grad.addColorStop(0, '#3b82f6');
+      grad.addColorStop(1, '#1d4ed8');
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Draw Orbit line
+      ctx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, apix, bpix, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Satellite position: True anomaly E
+      time += 0.012 * (1 + eccentricity);
+      const E = time;
+      const satX = cx + apix * Math.cos(E);
+      const satY = cy + bpix * Math.sin(E);
+
+      // Draw satellite
+      ctx.beginPath();
+      ctx.arc(satX, satY, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#00d4ff';
+      ctx.shadowColor = '#00d4ff';
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Labels
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Perigee: ${Math.round(altitude)} km`, 10, 20);
+      const Ra = a * (1 + eccentricity) - 6371;
+      ctx.fillText(`Apogee:  ${Math.round(Ra)} km`, 10, 34);
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+    render();
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [altitude, eccentricity]);
 
   return (
     <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>🔬 Orbit Simulator</div>
 
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>
-          <span>Altitude</span>
-          <span style={{ color: '#00d4ff', fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{altitude.toLocaleString()} km</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>
+            <span>Altitude</span>
+            <span style={{ color: '#00d4ff', fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{altitude.toLocaleString()} km</span>
+          </div>
+          <input type="range" min={160} max={36000} value={altitude}
+            onChange={e => setAltitude(Number(e.target.value))}
+            style={{ width: '100%', accentColor: '#00d4ff' }} />
         </div>
-        <input type="range" min={160} max={40000} value={altitude}
-          onChange={e => setAltitude(Number(e.target.value))}
-          style={{ width: '100%', accentColor: '#00d4ff' }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
-          <span>160 km (LEO min)</span><span>35,786 km (GEO)</span>
+
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>
+            <span>Eccentricity</span>
+            <span style={{ color: '#00d4ff', fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{eccentricity.toFixed(2)}</span>
+          </div>
+          <input type="range" min={0.0} max={0.7} step={0.01} value={eccentricity}
+            onChange={e => setEccentricity(Number(e.target.value))}
+            style={{ width: '100%', accentColor: '#00d4ff' }} />
+        </div>
+
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>
+            <span>Inclination</span>
+            <span style={{ color: '#00d4ff', fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{inclination.toFixed(1)}°</span>
+          </div>
+          <input type="range" min={0.0} max={90.0} step={0.5} value={inclination}
+            onChange={e => setInclination(Number(e.target.value))}
+            style={{ width: '100%', accentColor: '#00d4ff' }} />
         </div>
       </div>
 
-      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 16 }}>
         <div className="stat-card" style={{ padding: 12 }}>
-          <div className="stat-value" style={{ fontSize: 18, color: '#00d4ff' }}>{velocity.toFixed(2)}</div>
-          <div className="stat-label" style={{ fontSize: 10 }}>Orbital V (km/s)</div>
+          <div className="stat-value" style={{ fontSize: 15, color: '#00d4ff' }}>{velocity.toFixed(2)}</div>
+          <div className="stat-label" style={{ fontSize: 9 }}>Orbital V (km/s)</div>
         </div>
         <div className="stat-card" style={{ padding: 12 }}>
-          <div className="stat-value" style={{ fontSize: 18, color: '#7c3aed' }}>{period.toFixed(1)}</div>
-          <div className="stat-label" style={{ fontSize: 10 }}>Period (min)</div>
+          <div className="stat-value" style={{ fontSize: 15, color: '#7c3aed' }}>{period.toFixed(1)}</div>
+          <div className="stat-label" style={{ fontSize: 9 }}>Period (min)</div>
         </div>
         <div className="stat-card" style={{ padding: 12 }}>
-          <div className="stat-value" style={{ fontSize: 18, color: '#f59e0b' }}>{escape.toFixed(2)}</div>
-          <div className="stat-label" style={{ fontSize: 10 }}>Escape V (km/s)</div>
+          <div className="stat-value" style={{ fontSize: 15, color: '#f59e0b' }}>{escape.toFixed(2)}</div>
+          <div className="stat-label" style={{ fontSize: 9 }}>Escape V (km/s)</div>
         </div>
       </div>
 
       {/* Visual orbit representation */}
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '1', marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{
-          position: 'absolute', width: '40%', height: '40%', borderRadius: '50%',
-          background: 'linear-gradient(135deg, #1a6fb5, #1b8f5a)',
-          boxShadow: '0 0 20px rgba(0,140,255,0.3)',
-        }} />
-        <div style={{
-          position: 'absolute',
-          width: `${40 + (altitude / 40000) * 50}%`,
-          height: `${40 + (altitude / 40000) * 50}%`,
-          borderRadius: '50%', border: '2px solid rgba(0,212,255,0.3)',
-          animation: `orbit ${Math.max(1, period / 30)}s linear infinite`,
-        }}>
-          <div style={{
-            position: 'absolute', top: -4, left: '50%', transform: 'translateX(-50%)',
-            width: 8, height: 8, borderRadius: '50%', background: '#00d4ff',
-            boxShadow: '0 0 8px #00d4ff',
-          }} />
-        </div>
+      <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '10px' }}>
+        <canvas ref={canvasRef} width={240} height={180} style={{ display: 'block', maxWidth: '100%' }} />
       </div>
     </div>
   );
@@ -270,7 +365,10 @@ export function LabPanel() {
       <div>
         <div className="panel-header">
           <div className="panel-title">🌍 Orbit Lab</div>
-          <button className="btn-icon" onClick={() => { setActiveLab(null); addXP(25); unlockAchievement('orbit-lab'); }}>✕</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-icon" title="Back to List" onClick={() => { setActiveLab(null); addXP(25); unlockAchievement('orbit-lab'); }}>←</button>
+            <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+          </div>
         </div>
         <OrbitSimulator />
         <div className="glass-card" style={{ padding: 16 }}>
@@ -302,6 +400,7 @@ export function LabPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🔬 Simulation Labs</div>
+        <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {labs.map(lab => (
@@ -326,24 +425,83 @@ export function LabPanel() {
 function FlightLab({ onClose }: { onClose: () => void }) {
   const [speed, setSpeed] = useState(250); // m/s
   const [altitude, setAltitude] = useState(10000); // meters
-  const addXP = useUserStore(s => s.addXP);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
   // Physics calculations
   const airDensity = 1.225 * Math.exp(-altitude / 8500); // exponential atmosphere model
   const machNumber = speed / (340 * Math.sqrt(Math.max(0.1, 1 - altitude / 44000)));
   const liftCoeff = 0.3 + (speed > 100 ? 0.2 : 0);
-  const dragForce = 0.5 * airDensity * speed * speed * 0.02 * 150; // Cd * area * 0.5 * rho * v^2
+  const dragForce = 0.5 * airDensity * speed * speed * 0.02 * 150;
   const liftForce = 0.5 * airDensity * speed * speed * liftCoeff * 150;
   const weight = 75000 * 9.81;
   const canFly = liftForce > weight;
   const stallSpeed = Math.sqrt((2 * weight) / (airDensity * liftCoeff * 150));
-  const range = (speed / Math.max(1, dragForce / 1000)) * 3600 * 15 / 1000; // simplified range in km
+  const range = (speed / Math.max(1, dragForce / 1000)) * 3600 * 15 / 1000;
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Draw graph axes
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(40, 10); ctx.lineTo(40, h - 30); // Y-axis
+    ctx.lineTo(w - 10, h - 30); // X-axis
+    ctx.stroke();
+
+    // Draw Stall Boundary curve
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(40, h - 30);
+    for (let altVal = 0; altVal <= 18000; altVal += 1000) {
+      const rho = 1.225 * Math.exp(-altVal / 8500);
+      const stallSp = Math.sqrt((2 * weight) / (rho * liftCoeff * 150)) * 3.6; // km/h
+      const x = 40 + (stallSp / 1200) * (w - 50);
+      const y = h - 30 - (altVal / 18000) * (h - 40);
+      if (x < w - 10) ctx.lineTo(x, y);
+      else ctx.lineTo(w - 10, y);
+    }
+    ctx.lineTo(40, 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw current state dot
+    const curX = 40 + ((speed * 3.6) / 1200) * (w - 50);
+    const curY = h - 30 - (altitude / 18000) * (h - 40);
+    ctx.beginPath();
+    ctx.arc(curX, curY, 6, 0, Math.PI * 2);
+    ctx.fillStyle = canFly ? '#10b981' : '#ef4444';
+    ctx.shadowColor = canFly ? '#10b981' : '#ef4444';
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Axis Labels
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '9px sans-serif';
+    ctx.fillText("Speed (km/h)", w / 2 - 20, h - 10);
+    ctx.save();
+    ctx.translate(15, h / 2 - 20);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText("Altitude (m)", 0, 0);
+    ctx.restore();
+  }, [speed, altitude, canFly, liftCoeff, weight]);
 
   return (
     <div>
       <div className="panel-header">
-        <div className="panel-title">✈️ Flight Lab</div>
-        <button className="btn-icon" onClick={onClose}>✕</button>
+        <div className="panel-title">✈️ Flight Dynamics Lab</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-icon" title="Back to List" onClick={onClose}>←</button>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+        </div>
       </div>
 
       <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
@@ -395,22 +553,16 @@ function FlightLab({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
+      <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '10px', marginBottom: 12 }}>
+        <canvas ref={canvasRef} width={240} height={140} style={{ display: 'block', maxWidth: '100%' }} />
+      </div>
+
       <div className="glass-card" style={{ padding: 12, marginBottom: 12, textAlign: 'center' }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: canFly ? '#10b981' : '#ef4444' }}>
           {canFly ? '✅ Flight Sustained — Lift > Weight' : '❌ STALL — Increase speed or decrease altitude'}
         </div>
         <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
           Est. range: {Math.round(range).toLocaleString()} km · Weight: {(weight / 1000).toFixed(0)} kN
-        </div>
-      </div>
-
-      <div className="glass-card" style={{ padding: 16 }}>
-        <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.7 }}>
-          <strong style={{ color: '#f1f5f9' }}>Key Insights:</strong><br/>
-          • Air density drops exponentially with altitude (scale height ~8.5 km)<br/>
-          • Higher altitude = less drag = better fuel efficiency, but harder to generate lift<br/>
-          • Stall speed increases with altitude as air thins<br/>
-          • Commercial jets cruise at FL350-FL410 for optimal drag/lift balance
         </div>
       </div>
     </div>
@@ -424,18 +576,18 @@ function WeatherLab({ onClose }: { onClose: () => void }) {
   const [pressure, setPressure] = useState(1013); // hPa
   const [temperature, setTemperature] = useState(20); // °C
   const [humidity, setHumidity] = useState(60); // %
-  const addXP = useUserStore(s => s.addXP);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
   // Physics calculations
   const tempK = temperature + 273.15;
   const airDensity = (pressure * 100) / (287.05 * tempK);
   const dewPoint = temperature - ((100 - humidity) / 5);
-  const cloudBase = Math.max(0, (temperature - dewPoint) * 125); // meters
+  const cloudBase = Math.max(0, (temperature - dewPoint) * 125);
   const satVaporPressure = 6.112 * Math.exp((17.67 * temperature) / (temperature + 243.5));
   const actualVaporPressure = (humidity / 100) * satVaporPressure;
   const isStormRisk = pressure < 1000 && humidity > 80 && temperature > 25;
   const isFogRisk = Math.abs(temperature - dewPoint) < 2.5;
-  const windEstimate = Math.max(0, (1013 - pressure) * 2.5); // simplified pressure-gradient wind
+  const windEstimate = Math.max(0, (1013 - pressure) * 2.5);
 
   const weatherType = pressure < 990 ? '🌀 Tropical Storm Risk'
     : pressure < 1000 && humidity > 80 ? '🌧️ Heavy Rain / Thunderstorm'
@@ -443,11 +595,82 @@ function WeatherLab({ onClose }: { onClose: () => void }) {
     : pressure < 1020 ? '⛅ Partly Cloudy'
     : '☀️ Clear / Fair Weather';
 
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    let time = 0;
+
+    // Wind Circulation Particles
+    const particles: { r: number; angle: number; speed: number }[] = [];
+    for (let i = 0; i < 40; i++) {
+      particles.push({
+        r: 20 + Math.random() * 80,
+        angle: Math.random() * Math.PI * 2,
+        speed: (0.015 + Math.random() * 0.02) * Math.max(0.1, (1020 - pressure) * 0.08)
+      });
+    }
+
+    const render = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      // Draw thermal background
+      const tNorm = Math.max(0, Math.min(1, (temperature + 30) / 80));
+      const bgGrad = ctx.createRadialGradient(cx, cy, 10, cx, cy, 120);
+      bgGrad.addColorStop(0, tNorm > 0.5 ? `rgba(239, 68, 68, ${0.12 * tNorm})` : `rgba(59, 130, 246, ${0.12 * (1 - tNorm)})`);
+      bgGrad.addColorStop(1, 'rgba(15, 23, 42, 0.4)');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const isLow = pressure < 1013;
+      const circDirection = isLow ? -1 : 1;
+
+      particles.forEach(p => {
+        p.angle += p.speed * circDirection;
+        if (isLow) {
+          p.r -= 0.2;
+          if (p.r < 8) p.r = 80 + Math.random() * 20;
+        } else {
+          p.r += 0.2;
+          if (p.r > 100) p.r = 10 + Math.random() * 15;
+        }
+
+        const x = cx + Math.cos(p.angle) * p.r;
+        const y = cy + Math.sin(p.angle) * p.r;
+
+        ctx.beginPath();
+        ctx.arc(x, y, 2 + (humidity / 100) * 2, 0, Math.PI * 2);
+        ctx.fillStyle = isLow ? 'rgba(0, 212, 255, 0.65)' : 'rgba(245, 158, 11, 0.65)';
+        ctx.fill();
+      });
+
+      // Center mark
+      ctx.fillStyle = isLow ? '#00d4ff' : '#f59e0b';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(isLow ? 'L' : 'H', cx, cy);
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+    render();
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [pressure, temperature, humidity]);
+
   return (
     <div>
       <div className="panel-header">
-        <div className="panel-title">🌪️ Weather Lab</div>
-        <button className="btn-icon" onClick={onClose}>✕</button>
+        <div className="panel-title">🌪️ Weather Simulation Lab</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-icon" title="Back to List" onClick={onClose}>←</button>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+        </div>
       </div>
 
       <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
@@ -483,6 +706,10 @@ function WeatherLab({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
+      <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '10px', marginBottom: 12 }}>
+        <canvas ref={canvasRef} width={240} height={140} style={{ display: 'block', maxWidth: '100%' }} />
+      </div>
+
       <div className="glass-card" style={{ padding: 16, textAlign: 'center', marginBottom: 12, background: isStormRisk ? 'rgba(239,68,68,0.1)' : isFogRisk ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)' }}>
         <div style={{ fontSize: 24, marginBottom: 4 }}>{weatherType.split(' ')[0]}</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: isStormRisk ? '#ef4444' : isFogRisk ? '#f59e0b' : '#10b981' }}>
@@ -505,27 +732,6 @@ function WeatherLab({ onClose }: { onClose: () => void }) {
           <div className="stat-label" style={{ fontSize: 10 }}>Wind (km/h)</div>
         </div>
       </div>
-
-      <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
-        <div className="stat-card" style={{ padding: 12 }}>
-          <div className="stat-value" style={{ fontSize: 16, color: '#10b981' }}>{airDensity.toFixed(3)}</div>
-          <div className="stat-label" style={{ fontSize: 10 }}>Air ρ (kg/m³)</div>
-        </div>
-        <div className="stat-card" style={{ padding: 12 }}>
-          <div className="stat-value" style={{ fontSize: 16, color: '#ef4444' }}>{actualVaporPressure.toFixed(1)}</div>
-          <div className="stat-label" style={{ fontSize: 10 }}>Vapor P (hPa)</div>
-        </div>
-      </div>
-
-      <div className="glass-card" style={{ padding: 16 }}>
-        <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.7 }}>
-          <strong style={{ color: '#f1f5f9' }}>Key Insights:</strong><br/>
-          • Low pressure = stormy weather; high pressure = clear skies<br/>
-          • When temp ≈ dew point, fog/clouds form (air is saturated)<br/>
-          • Cloud base height = (Temp − Dew Point) × 125 meters<br/>
-          • Hurricanes form when pressure drops below ~990 hPa over warm water (&gt;26.5°C)
-        </div>
-      </div>
     </div>
   );
 }
@@ -540,31 +746,129 @@ function RocketLab({ onClose }: { onClose: () => void }) {
   const [launched, setLaunched] = useState(false);
   const [altitude, setAltitude] = useState(0);
   const [velocity, setVelocity] = useState(0);
+  const [downrange, setDownrange] = useState(0);
+  const [stagingMsg, setStagingMsg] = useState('Ready for Launch');
+  const [flightPath, setFlightPath] = useState<{ x: number; y: number }[]>([]);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const timerRef = React.useRef<any>(null);
   const addXP = useUserStore(s => s.addXP);
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!launched) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Draw axes
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.moveTo(35, 10); ctx.lineTo(35, h - 25); ctx.lineTo(w - 10, h - 25);
+    ctx.stroke();
+
+    // Plot flight path
+    ctx.strokeStyle = '#00d4ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    flightPath.forEach((pt, i) => {
+      const px = 35 + (pt.x / 500) * (w - 55);
+      const py = h - 25 - (pt.y / 350) * (h - 35);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+
+    // Target orbit line
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    const targetY = h - 25 - (200 / 350) * (h - 35);
+    ctx.moveTo(35, targetY);
+    ctx.lineTo(w - 10, targetY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Earth curve at bottom-left corner
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.arc(35, h - 25, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw current rocket position dot
+    if (flightPath.length > 0) {
+      const lastPt = flightPath[flightPath.length - 1];
+      const px = 35 + (lastPt.x / 500) * (w - 55);
+      const py = h - 25 - (lastPt.y / 350) * (h - 35);
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#ef4444';
+      ctx.fill();
+    }
+  }, [flightPath, launched]);
 
   const handleLaunch = () => {
     setLaunched(true);
-    let alt = 0; let vel = 0; let f = fuel;
-    const interval = setInterval(() => {
+    setFlightPath([{ x: 0, y: 0 }]);
+    setAltitude(0);
+    setVelocity(0);
+    setDownrange(0);
+    setStagingMsg('Stage 1 Thrusting...');
+    
+    let alt = 0; let vel = 0; let f = fuel; let dr = 0;
+    let stage = 1;
+    
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
       if (f > 0) {
-        const thrustForce = thrust * 0.15;
+        const thrustForce = thrust * 0.16;
         const gravity = 9.81 * Math.pow(6371 / (6371 + alt), 2);
         const angleRad = angle * Math.PI / 180;
-        vel += (thrustForce * Math.sin(angleRad) - gravity) * 0.1;
-        alt += vel * 0.1;
-        f -= 0.5;
+        
+        if (stage === 1 && f < fuel * 0.5) {
+          stage = 2;
+          setStagingMsg('Stage 1 Separation — Stage 2 Ignited!');
+          addXP(20);
+        }
+
+        vel += (thrustForce * Math.sin(angleRad) - gravity) * 0.15;
+        alt += vel * 0.15;
+        dr += vel * Math.cos(angleRad) * 0.15;
+        f -= 0.65;
       } else {
+        setStagingMsg('Fuel Depleted — Coasting');
         const gravity = 9.81 * Math.pow(6371 / (6371 + alt), 2);
-        vel -= gravity * 0.1;
-        alt += vel * 0.1;
+        vel -= gravity * 0.15;
+        alt += vel * 0.15;
+        dr += Math.max(0, vel) * 0.05;
       }
-      if (alt < 0) { alt = 0; vel = 0; clearInterval(interval); }
+
+      if (alt <= 0 && f <= 0) {
+        alt = 0; vel = 0;
+        setStagingMsg('Suborbital Crash — Gravity wins!');
+        if (timerRef.current) clearInterval(timerRef.current);
+      }
+
       setAltitude(Math.max(0, alt));
-      setVelocity(vel);
+      setVelocity(Math.max(0, vel));
+      setDownrange(dr);
       setFuel(Math.max(0, f));
-      if (alt > 200 && vel > 5) {
+
+      setFlightPath(prev => [...prev, { x: dr, y: alt }]);
+
+      if (alt > 200 && vel > 7.5) {
+        setStagingMsg('Orbit Achieved! Stable LEO established.');
         addXP(100);
-        clearInterval(interval);
+        if (timerRef.current) clearInterval(timerRef.current);
       }
     }, 100);
   };
@@ -573,7 +877,10 @@ function RocketLab({ onClose }: { onClose: () => void }) {
     <div>
       <div className="panel-header">
         <div className="panel-title">🚀 Rocket Lab</div>
-        <button className="btn-icon" onClick={onClose}>✕</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-icon" title="Back to List" onClick={onClose}>←</button>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+        </div>
       </div>
 
       <div className="stat-grid">
@@ -620,28 +927,34 @@ function RocketLab({ onClose }: { onClose: () => void }) {
       )}
 
       {launched && (
-        <div className="glass-card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.7 }}>
-            {altitude > 200 && velocity > 5 ? (
-              <div style={{ color: '#10b981', fontWeight: 700, fontSize: 18, textAlign: 'center' }}>
-                🎉 ORBIT ACHIEVED!<br/>
-                <span style={{ fontSize: 13 }}>+100 XP earned!</span>
-              </div>
-            ) : altitude === 0 && velocity === 0 ? (
-              <div style={{ color: '#ef4444', textAlign: 'center' }}>
-                💥 Launch failed! Adjust parameters and try again.
-                <button className="btn-secondary" style={{ marginTop: 12, width: '100%' }} onClick={() => { setLaunched(false); setFuel(85); }}>
-                  Try Again
-                </button>
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ fontSize: 24 }}>🚀</span><br/>
-                Rocket in flight...
-              </div>
-            )}
+        <>
+          <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '10px', marginBottom: 12 }}>
+            <canvas ref={canvasRef} width={240} height={140} style={{ display: 'block', maxWidth: '100%' }} />
           </div>
-        </div>
+          <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.7, textAlign: 'center' }}>
+              <div style={{ fontWeight: 700, color: '#00d4ff', marginBottom: 8 }}>{stagingMsg}</div>
+              {altitude > 200 && velocity > 7.5 ? (
+                <div style={{ color: '#10b981', fontWeight: 700, fontSize: 18 }}>
+                  🎉 ORBIT ACHIEVED!<br/>
+                  <span style={{ fontSize: 13 }}>+100 XP earned!</span>
+                </div>
+              ) : altitude === 0 && velocity === 0 ? (
+                <div style={{ color: '#ef4444' }}>
+                  💥 Launch failed! Adjust parameters and try again.
+                  <button className="btn-secondary" style={{ marginTop: 12, width: '100%' }} onClick={() => { setLaunched(false); setFuel(85); }}>
+                    Try Again
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <span style={{ fontSize: 24 }}>🚀</span><br/>
+                  Rocket in flight...
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -824,6 +1137,7 @@ export function AcademyPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="panel-header">
         <div className="panel-title">📚 AI Tutor</div>
+        <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
       </div>
 
       {/* Main switch between Lessons and AI Tutor */}
@@ -1023,6 +1337,7 @@ export function AchievementPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🏆 Progress</div>
+        <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
       </div>
 
       {/* Rank card */}

@@ -3,8 +3,8 @@
 import React, { useEffect, useCallback, lazy, Suspense } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAppStore, useFlightStore, useSatelliteStore, useUserStore } from '@/stores/stores';
-import { generateSimulatedAircraft, generateSimulatedSatellites, updateSatellitePositions } from '@/lib/data';
-import { Sidebar, HUD, StatusBar, PanelContainer } from '@/components/ui/Panels';
+import { generateSimulatedAircraft, generateSimulatedSatellites, updateSatellitePositions, AIRPORTS } from '@/lib/data';
+import { Sidebar, HUD, StatusBar, PanelContainer, SimulationControls } from '@/components/ui/Panels';
 import { EducationPanelRouter } from '@/components/ui/Education';
 import { LoadingScreen } from '@/components/ui/Shared';
 
@@ -66,8 +66,18 @@ export default function EarthExplorerPage() {
   useEffect(() => {
     if (!loaded) return;
     const interval = setInterval(() => {
+      const state = useAppStore.getState();
+      if (state.isPaused) return;
+
+      const timeScale = state.timeScale;
+      // If realtime, keep simulatedTime in sync with actual clock
+      if (state.isRealtimeData) {
+        useAppStore.setState({ simulatedTime: Date.now() / 1000 });
+      }
+      const currentSimTime = useAppStore.getState().simulatedTime;
+
       const sats = useSatelliteStore.getState().satellites;
-      const updated = updateSatellitePositions(sats, 2000);
+      const updated = updateSatellitePositions(sats, 2000 * timeScale, currentSimTime);
       useSatelliteStore.getState().setSatellites(updated);
 
       // Update ISS position
@@ -78,7 +88,7 @@ export default function EarthExplorerPage() {
       const aircraft = useFlightStore.getState().aircraft;
       const updatedAircraft = aircraft.map(ac => {
         const headingRad = ac.heading * Math.PI / 180;
-        const speedDeg = (ac.speed / 111320) * 2; // approximate deg per 2s update
+        const speedDeg = (ac.speed / 111320) * 2 * timeScale; // approximate deg per 2s update scaled
         const cosLat = Math.cos(ac.latitude * Math.PI / 180);
         let newLat = ac.latitude + Math.cos(headingRad) * speedDeg;
         let newLon = ac.longitude + Math.sin(headingRad) * speedDeg / (cosLat > 0.1 ? cosLat : 1.0);
@@ -101,6 +111,85 @@ export default function EarthExplorerPage() {
 
     return () => clearInterval(interval);
   }, [loaded]);
+
+  const isRealtimeData = useAppStore(s => s.isRealtimeData);
+
+  // Poll real-time flight data when isRealtimeData is enabled
+  useEffect(() => {
+    if (!loaded) return;
+    if (!isRealtimeData) {
+      // Re-initialize with simulated flights if disabled
+      const aircraft = generateSimulatedAircraft(400);
+      setAircraft(aircraft);
+      return;
+    }
+
+    let active = true;
+    const fetchRealtimeFlights = async () => {
+      try {
+        const res = await fetch('/api/aircraft');
+        if (!res.ok) throw new Error('Failed to fetch realtime flight data');
+        const data = await res.json();
+        
+        if (!active) return;
+        
+        if (data && Array.isArray(data.states)) {
+          const mapped = data.states
+            .filter((state: any) => state[5] !== null && state[6] !== null) // valid lat/lon
+            .slice(0, 400) // limit count
+            .map((state: any) => {
+              const icao24 = state[0];
+              const callsign = state[1]?.trim() || `AC${icao24.toUpperCase()}`;
+              const altitude = state[7] || state[13] || 10000;
+              const speed = state[9] || 250;
+              const heading = state[10] || 0;
+              
+              // Seed airport origins and destinations procedurally since OpenSky only returns positions
+              const seed = icao24.charCodeAt(0) + icao24.charCodeAt(1);
+              const airportKeys = Object.keys(AIRPORTS);
+              const originKey = airportKeys[seed % airportKeys.length];
+              const destKey = airportKeys[(seed + 7) % airportKeys.length];
+              const origin = AIRPORTS[originKey];
+              const dest = AIRPORTS[destKey];
+
+              return {
+                id: icao24,
+                callsign,
+                flightNumber: callsign,
+                airline: getAirlineNameFromICAO(callsign.substring(0, 3)),
+                origin: `${originKey} - ${origin.name}`,
+                destination: `${destKey} - ${dest.name}`,
+                latitude: state[6],
+                longitude: state[5],
+                altitude,
+                speed,
+                heading,
+                verticalRate: state[11] || 0,
+                aircraftType: 'Commercial',
+                category: 'commercial',
+                onGround: state[8] || false,
+                lastUpdate: Date.now(),
+                trail: [],
+              };
+            });
+
+          if (mapped.length > 0) {
+            setAircraft(mapped);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchRealtimeFlights();
+    const pollInterval = setInterval(fetchRealtimeFlights, 15000);
+
+    return () => {
+      active = false;
+      clearInterval(pollInterval);
+    };
+  }, [loaded, isRealtimeData, setAircraft]);
 
   const isEducationPanel = ['missions', 'labs', 'academy', 'achievements'].includes(activePanel);
 
@@ -128,6 +217,9 @@ export default function EarthExplorerPage() {
 
           {/* HUD Top Bar */}
           <HUD />
+
+          {/* Simulation Playback Controls */}
+          <SimulationControls />
 
           {/* Data Panels (flights, satellites, ISS, weather) */}
           <PanelContainer />
@@ -172,6 +264,7 @@ function LayerToggles() {
   const realisticColors = useAppStore(s => s.realisticColors);
   const showAuroras = useAppStore(s => s.showAuroras);
   const showHeatmap = useAppStore(s => s.showHeatmap);
+  const isRealtimeData = useAppStore(s => s.isRealtimeData);
 
   const layers = [
     { key: 'showFlights', label: 'Flights', icon: '✈️', active: showFlights },
@@ -183,6 +276,7 @@ function LayerToggles() {
     { key: 'showAuroras', label: 'Auroras', icon: '🌌', active: showAuroras },
     { key: 'showHeatmap', label: 'Heatmap', icon: '🔥', active: showHeatmap },
     { key: 'realisticColors', label: 'Realistic Style', icon: '🎨', active: realisticColors },
+    { key: 'isRealtimeData', label: 'Realtime Data', icon: '📡', active: isRealtimeData },
   ];
 
   return (
@@ -219,4 +313,25 @@ function LayerToggles() {
    ================================================================ */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getAirlineNameFromICAO(icao: string): string {
+  const mapping: Record<string, string> = {
+    AAL: 'American Airlines',
+    BAW: 'British Airways',
+    DLH: 'Lufthansa',
+    UAE: 'Emirates',
+    SIA: 'Singapore Airlines',
+    QFA: 'Qantas',
+    ANA: 'ANA',
+    AFR: 'Air France',
+    CPA: 'Cathay Pacific',
+    JAL: 'Japan Airlines',
+    FDX: 'FedEx',
+    UPS: 'UPS Airlines',
+    GTI: 'Atlas Air',
+    NJE: 'NetJets',
+    VJT: 'VistaJet',
+  };
+  return mapping[icao.toUpperCase()] || 'Commercial Flight';
 }

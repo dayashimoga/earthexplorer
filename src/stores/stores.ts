@@ -28,7 +28,9 @@ interface AppState {
   weatherLayerMode: WeatherLayerMode;
   timeScale: number;
   searchQuery: string;
+  isPaused: boolean;
   realisticColors: boolean;
+  isRealtimeData: boolean;
   setLoaded: (v: boolean) => void;
   setLoadProgress: (v: number) => void;
   setActivePanel: (p: ActivePanel) => void;
@@ -42,6 +44,9 @@ interface AppState {
   toggleLayer: (layer: string) => void;
   setSearchQuery: (q: string) => void;
   setTimeScale: (s: number) => void;
+  setIsPaused: (v: boolean) => void;
+  simulatedTime: number;
+  incrementSimulatedTime: (delta: number) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -56,7 +61,9 @@ export const useAppStore = create<AppState>((set) => ({
   showAuroras: true, showHeatmap: false, showWindVectors: true,
   weatherLayerMode: 'clouds',
   timeScale: 1, searchQuery: '',
+  isPaused: false,
   realisticColors: false,
+  isRealtimeData: false,
   setLoaded: (v) => set({ loaded: v }),
   setLoadProgress: (v) => set({ loadProgress: v }),
   setActivePanel: (p) => set((s) => ({ activePanel: s.activePanel === p ? 'none' : p })),
@@ -70,6 +77,9 @@ export const useAppStore = create<AppState>((set) => ({
   toggleLayer: (layer) => set((s) => ({ ...s, [layer]: !(s as any)[layer] })),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setTimeScale: (s) => set({ timeScale: s }),
+  setIsPaused: (v) => set({ isPaused: v }),
+  simulatedTime: typeof Date !== 'undefined' ? Date.now() / 1000 : 0,
+  incrementSimulatedTime: (delta) => set((s) => ({ simulatedTime: s.simulatedTime + delta })),
 }));
 
 /* ===== FLIGHT STORE ===== */

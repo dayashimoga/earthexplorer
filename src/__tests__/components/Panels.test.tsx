@@ -301,7 +301,8 @@ describe('More Panels Interactions', () => {
   it('clicking weather toggles weather layer', () => {
     useAppStore.setState({ activePanel: 'weather', showWeather: false });
     render(<PanelContainer />);
-    const btn = document.querySelector('.btn-icon');
+    const btns = Array.from(document.querySelectorAll('.btn-icon'));
+    const btn = btns.find(b => b.querySelector('div'));
     if (btn) {
       fireEvent.click(btn);
       expect(useAppStore.getState().showWeather).toBe(true);

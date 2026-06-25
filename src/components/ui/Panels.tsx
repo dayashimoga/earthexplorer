@@ -3,7 +3,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, useFlightStore, useSatelliteStore, useUserStore } from '@/stores/stores';
-import { calculateCoverage, getNextPassTime, generateAirportTraffic, latLonToVec3, AIRPORTS } from '@/lib/data';
+import { calculateCoverage, getNextPassTime, generateAirportTraffic, latLonToVec3, AIRPORTS, searchEntities } from '@/lib/data';
+import type { SearchResult } from '@/lib/data';
 import type { ActivePanel, Aircraft, Satellite } from '@/types';
 import * as THREE from 'three';
 
@@ -77,43 +78,90 @@ export function HUD() {
   const userLevel = useUserStore(s => s.level);
   const streak = useUserStore(s => s.streak);
 
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+
   const handleSearch = (q: string) => {
     setSearchQuery(q);
     if (q.length >= 2) {
-      const ql = q.toLowerCase();
-      
-      // Match airports first
-      const airportMatch = Object.keys(AIRPORTS).find(code =>
-        code.toLowerCase().includes(ql) || AIRPORTS[code].name.toLowerCase().includes(ql)
-      );
-      if (airportMatch) {
-        useAppStore.getState().selectAirport(airportMatch);
-        useAppStore.getState().setViewTarget({ lat: AIRPORTS[airportMatch].lat, lon: AIRPORTS[airportMatch].lon, entityId: airportMatch, entityType: 'airport' });
-        return;
-      }
-
-      const flightMatch = aircraft.some(a =>
-        a.callsign.toLowerCase().includes(ql) || a.airline.toLowerCase().includes(ql) ||
-        a.flightNumber.toLowerCase().includes(ql) || a.origin.toLowerCase().includes(ql) ||
-        a.destination.toLowerCase().includes(ql)
-      );
-      const satMatch = satellites.some(s =>
-        s.name.toLowerCase().includes(ql) || s.category.toLowerCase().includes(ql) ||
-        s.id.toLowerCase().includes(ql)
-      );
-      if (flightMatch && activePanel !== 'flights') setActivePanel('flights');
-      else if (satMatch && !flightMatch && activePanel !== 'satellites') setActivePanel('satellites');
+      const results = searchEntities(q, aircraft, satellites);
+      setSearchResults(results);
+    } else {
+      setSearchResults([]);
     }
   };
 
+  const handleSelectResult = (res: SearchResult) => {
+    setSearchQuery('');
+    setSearchResults([]);
+
+    const viewTargetType = res.type === 'coordinate' ? undefined : res.type;
+
+    // Focus camera on target
+    useAppStore.getState().setViewTarget({
+      lat: res.lat,
+      lon: res.lon,
+      entityId: res.id,
+      entityType: viewTargetType,
+    });
+
+    // Select entity and open panel
+    if (res.type === 'aircraft') {
+      useAppStore.getState().selectAircraft(res.id);
+    } else if (res.type === 'satellite') {
+      useAppStore.getState().selectSatellite(res.id);
+    } else if (res.type === 'airport') {
+      useAppStore.getState().selectAirport(res.id);
+    }
+  };
+
+  // Close search on blur or click away (simple check)
+  useEffect(() => {
+    const clickAway = () => setSearchResults([]);
+    window.addEventListener('click', clickAway);
+    return () => window.removeEventListener('click', clickAway);
+  }, []);
+
   return (
     <div className="hud-top">
-      <input
-        className="hud-search"
-        placeholder="Search flights, satellites, locations..."
-        value={searchQuery}
-        onChange={e => handleSearch(e.target.value)}
-      />
+      <div style={{ position: 'relative', flex: 1, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+        <input
+          className="hud-search"
+          placeholder="Search flights, satellites, locations..."
+          value={searchQuery}
+          style={{ width: '100%' }}
+          onChange={e => handleSearch(e.target.value)}
+        />
+        {searchResults.length > 0 && (
+          <div className="glass" style={{
+            position: 'absolute', top: '50px', left: 0, right: 0,
+            maxHeight: '320px', overflowY: 'auto', zIndex: 999,
+            padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px',
+            borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+          }}>
+            {searchResults.map(res => (
+              <div
+                key={res.id}
+                onClick={() => handleSelectResult(res)}
+                style={{
+                  padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', gap: '2px',
+                  transition: 'background 0.2s'
+                }}
+                className="search-item-hover"
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, fontSize: '13px', color: '#f1f5f9' }}>{res.name}</span>
+                  <span className="rank-badge" style={{ fontSize: '9px', padding: '2px 6px', textTransform: 'capitalize' }}>
+                    {res.type}
+                  </span>
+                </div>
+                <span style={{ fontSize: '11px', color: '#94a3b8' }}>{res.subtitle}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="hud-badge" style={{ color: '#00d4ff' }}>
         <span>✈️</span> {aircraft.length}
       </div>
@@ -128,6 +176,80 @@ export function HUD() {
       </div>
       <div className="hud-badge" style={{ color: '#00d4ff' }}>
         <span style={{ fontSize: 11 }}>XP</span> {userXP.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   SIMULATION PLAYBACK CONTROLS
+   ================================================================ */
+export function SimulationControls() {
+  const isPaused = useAppStore(s => s.isPaused);
+  const setIsPaused = useAppStore(s => s.setIsPaused);
+  const timeScale = useAppStore(s => s.timeScale);
+  const setTimeScale = useAppStore(s => s.setTimeScale);
+  const simulatedTime = useAppStore(s => s.simulatedTime);
+
+  const formattedTime = useMemo(() => {
+    const d = new Date(simulatedTime * 1000);
+    return d.toUTCString().replace('GMT', 'UTC');
+  }, [simulatedTime]);
+
+  const speeds = [1, 2, 5, 10, 100, 1000];
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 48, left: '50%', transform: 'translateX(-50%)', zIndex: 80,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+      padding: '8px 16px', borderRadius: 16,
+      background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(20px)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    }}>
+      {/* Time Display */}
+      <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: '#00d4ff', fontWeight: 600 }}>
+        SIM TIME: {formattedTime}
+      </div>
+      
+      {/* Controls row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Play / Pause button */}
+        <button
+          onClick={() => setIsPaused(!isPaused)}
+          style={{
+            background: isPaused ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+            border: `1px solid ${isPaused ? '#10b981' : '#ef4444'}`,
+            color: isPaused ? '#10b981' : '#ef4444',
+            borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 700,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <span>{isPaused ? '▶️ PLAY' : '⏸️ PAUSE'}</span>
+        </button>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
+
+        {/* Speed Buttons */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {speeds.map(spd => (
+            <button
+              key={spd}
+              onClick={() => setTimeScale(spd)}
+              style={{
+                background: timeScale === spd ? 'rgba(0, 212, 255, 0.15)' : 'transparent',
+                border: `1px solid ${timeScale === spd ? 'rgba(0, 212, 255, 0.3)' : 'transparent'}`,
+                color: timeScale === spd ? '#00d4ff' : '#64748b',
+                borderRadius: 6, padding: '2px 8px', fontSize: 10, fontWeight: 600,
+                cursor: 'pointer', transition: 'all 0.2s ease',
+              }}
+            >
+              {spd}x
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -197,7 +319,10 @@ function FlightPanel() {
       <div>
         <div className="panel-header">
           <div className="panel-title">✈️ Flight Details</div>
-          <button className="btn-icon" onClick={() => selectAircraft(null)}>{icons.close}</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-icon" title="Back to List" onClick={() => selectAircraft(null)}>←</button>
+            <button className="btn-icon" title="Close Panel" onClick={() => { selectAircraft(null); useAppStore.getState().setActivePanel('none'); }}>✕</button>
+          </div>
         </div>
 
         <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
@@ -283,6 +408,28 @@ function FlightPanel() {
           </div>
         </div>
 
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>Verify Realtime Data</div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <a
+              href={`https://www.flightradar24.com/data/flights/${selectedAircraft.flightNumber}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 13, color: '#00d4ff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              Flightradar24 ↗
+            </a>
+            <a
+              href={`https://opensky-network.org/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 13, color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              OpenSky Network ↗
+            </a>
+          </div>
+        </div>
+
         <button className="btn-primary" style={{ width: '100%', marginTop: 16 }}
           onClick={() => setViewTarget({ lat: selectedAircraft.latitude, lon: selectedAircraft.longitude, entityId: selectedAircraft.id, entityType: 'aircraft' })}>
           🎯 Track on Globe
@@ -295,7 +442,10 @@ function FlightPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">✈️ Live Flights</div>
-        <div style={{ fontSize: 13, color: '#94a3b8' }}>{aircraft.length} active</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>{aircraft.length} active</div>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+        </div>
       </div>
 
       <div className="tab-bar">
@@ -410,7 +560,10 @@ function SatellitePanel() {
       <div>
         <div className="panel-header">
           <div className="panel-title">🛰️ Satellite Details</div>
-          <button className="btn-icon" onClick={() => selectSatellite(null)}>{icons.close}</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-icon" title="Back to List" onClick={() => selectSatellite(null)}>←</button>
+            <button className="btn-icon" title="Close Panel" onClick={() => { selectSatellite(null); useAppStore.getState().setActivePanel('none'); }}>✕</button>
+          </div>
         </div>
 
         <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
@@ -423,6 +576,27 @@ function SatellitePanel() {
             <span className="rank-badge" style={getCategoryBadgeStyle(selectedSat.category)}>
               {selectedSat.category.toUpperCase()}
             </span>
+          </div>
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left' }}>
+            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Verify Realtime Data</div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <a
+                href={selectedSat.category === 'iss' ? 'https://www.n2yo.com/satellite/?s=25544' : `https://www.n2yo.com/satellite/?s=${selectedSat.noradId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 13, color: '#00d4ff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              >
+                N2YO ↗
+              </a>
+              <a
+                href="https://celestrak.org/"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 13, color: '#10b981', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              >
+                CelesTrak ↗
+              </a>
+            </div>
           </div>
         </div>
 
@@ -477,7 +651,10 @@ function SatellitePanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🛰️ Satellites</div>
-        <div style={{ fontSize: 13, color: '#94a3b8' }}>{satellites.length} tracked</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>{satellites.length} tracked</div>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
+        </div>
       </div>
 
       {/* Category overview */}
@@ -542,9 +719,12 @@ function ISSPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🏠 ISS Live</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }} />
-          <span style={{ fontSize: 12, color: '#10b981', fontWeight: 600 }}>LIVE</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }} />
+            <span style={{ fontSize: 12, color: '#10b981', fontWeight: 600 }}>LIVE</span>
+          </div>
+          <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
         </div>
       </div>
 
@@ -637,6 +817,7 @@ function WeatherPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🌦️ Weather</div>
+        <button className="btn-icon" title="Close Panel" onClick={() => useAppStore.getState().setActivePanel('none')}>✕</button>
       </div>
 
       <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
@@ -701,8 +882,49 @@ function WeatherPanel() {
 }
 
 /* ================================================================
-   AIRPORT PANEL
+   AIRPORT PANEL HELPERS & COMPONENT
    ================================================================ */
+const AIRLINE_BRAND_THEMES: Record<string, { bg: string; color: string; border: string }> = {
+  AA: { bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.3)' },
+  BA: { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' },
+  LH: { bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' },
+  EK: { bg: 'rgba(220, 38, 38, 0.15)', color: '#f87171', border: 'rgba(220, 38, 38, 0.3)' },
+  SQ: { bg: 'rgba(3, 105, 161, 0.15)', color: '#38bdf8', border: 'rgba(3, 105, 161, 0.3)' },
+  QF: { bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.25)' },
+  NH: { bg: 'rgba(29, 78, 216, 0.15)', color: '#60a5fa', border: 'rgba(29, 78, 216, 0.3)' },
+  AF: { bg: 'rgba(255, 255, 255, 0.05)', color: '#f1f5f9', border: 'rgba(255, 255, 255, 0.15)' },
+  CX: { bg: 'rgba(15, 118, 110, 0.15)', color: '#2dd4bf', border: 'rgba(15, 118, 110, 0.3)' },
+  JL: { bg: 'rgba(244, 63, 94, 0.15)', color: '#fb7185', border: 'rgba(244, 63, 94, 0.3)' },
+};
+
+function AirlineFlightBadge({ flightNumber, airline }: { flightNumber: string; airline: string }) {
+  const prefix = flightNumber.substring(0, 2);
+  const theme = AIRLINE_BRAND_THEMES[prefix] || { bg: 'rgba(255, 255, 255, 0.05)', color: '#cbd5e1', border: 'rgba(255, 255, 255, 0.1)' };
+  
+  return (
+    <span
+      title={airline}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2px 6px',
+        borderRadius: '6px',
+        fontSize: '11px',
+        fontWeight: 700,
+        fontFamily: 'JetBrains Mono, monospace',
+        background: theme.bg,
+        color: theme.color,
+        border: `1px solid ${theme.border}`,
+        marginRight: '8px',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      {flightNumber}
+    </span>
+  );
+}
+
 function AirportPanel() {
   const selectedCode = useAppStore(s => s.selectedAirportCode);
   const selectAirport = useAppStore(s => s.selectAirport);
@@ -719,7 +941,7 @@ function AirportPanel() {
     <div>
       <div className="panel-header">
         <div className="panel-title">🛬 Airport Details</div>
-        <button className="btn-icon" onClick={() => selectAirport(null)}>{icons.close}</button>
+        <button className="btn-icon" title="Close Panel" onClick={() => { selectAirport(null); useAppStore.getState().setActivePanel('none'); }}>✕</button>
       </div>
 
       <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
@@ -740,9 +962,9 @@ function AirportPanel() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {traffic.departures.map((dep, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-              <div>
-                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, color: '#f59e0b', marginRight: 8 }}>{dep.flightNumber}</span>
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <AirlineFlightBadge flightNumber={dep.flightNumber} airline={dep.airline} />
                 <span style={{ color: '#f1f5f9' }}>{dep.destination?.split(' - ')[0]}</span>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -765,9 +987,9 @@ function AirportPanel() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {traffic.arrivals.map((arr, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-              <div>
-                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, color: '#7c3aed', marginRight: 8 }}>{arr.flightNumber}</span>
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <AirlineFlightBadge flightNumber={arr.flightNumber} airline={arr.airline} />
                 <span style={{ color: '#f1f5f9' }}>{arr.origin?.split(' - ')[0]}</span>
               </div>
               <div style={{ textAlign: 'right' }}>

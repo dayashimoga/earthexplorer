@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useAppStore, useFlightStore, useSatelliteStore } from '@/stores/stores';
-import { latLonToVec3, greatCircleArc, getSunPosition, AIRPORTS } from '@/lib/data';
+import { latLonToVec3, greatCircleArc, getSunPosition, AIRPORTS, getSatellitePositionAtTime } from '@/lib/data';
 
 const EARTH_RADIUS = 5;
 
@@ -177,26 +177,6 @@ function createSatelliteGeometry(): THREE.BufferGeometry {
   mast.dispose();
 
   return merged;
-}
-
-/* === HELPER FOR SATELLITE POSITION CALCULATION === */
-function getSatellitePositionAtTime(sat: any, t: number): { lat: number; lon: number } {
-  let lat = sat.latitude;
-  let lon = sat.longitude;
-  
-  if (sat.category === 'iss') {
-    lon = ((t * 0.0667) % 360) - 180;
-    lat = 51.6 * Math.sin(t * 0.0011);
-  } else if (sat.phase !== undefined && sat.raan !== undefined) {
-    const angularVel = 360 / (sat.period * 60); // deg/s
-    const trueAnomaly = (sat.phase + angularVel * t) % 360;
-    lat = sat.inclination * Math.sin(trueAnomaly * Math.PI / 180);
-    let wrappedLon = (sat.raan + trueAnomaly - (t * 0.00417)) % 360;
-    if (wrappedLon > 180) wrappedLon -= 360;
-    if (wrappedLon < -180) wrappedLon += 360;
-    lon = wrappedLon;
-  }
-  return { lat, lon };
 }
 
 /* === PROCEDURAL NOISE FOR FALLBACK TEXTURES === */
@@ -379,12 +359,16 @@ const earthFragmentShader = `
     
     vec4 finalColor = mix(vec4(nightSide, 1.0), vec4(dayColor, 1.0), dayFactor);
     
-    // Add subtle blue tint to terminator
+    // Add subtle blue tint and soft red-orange twilight band to terminator
     float terminator = 1.0 - abs(sunDot);
-    terminator = pow(terminator, 8.0);
-    finalColor.rgb += vec3(0.1, 0.15, 0.3) * terminator;
+    float blueTerminator = pow(terminator, 8.0);
+    float orangeTwilight = pow(terminator, 4.0) * (1.0 - dayFactor);
+    finalColor.rgb += vec3(0.1, 0.15, 0.3) * blueTerminator;
+    finalColor.rgb += vec3(0.9, 0.35, 0.12) * orangeTwilight * 0.45;
+    
     gl_FragColor = finalColor;
   }
+
 `;
 
 /* ================================================================
@@ -394,6 +378,7 @@ function Earth({ sunRef }: { sunRef: React.RefObject<THREE.DirectionalLight> }) 
   const meshRef = useRef<THREE.Mesh>(null);
   const atmRef = useRef<THREE.Mesh>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
+  const cloudsRef2 = useRef<THREE.Mesh>(null);
   const cloudMatRef = useRef<THREE.MeshPhongMaterial>(null);
 
   // Generate procedural fallback textures (runs once, no network)
@@ -449,19 +434,28 @@ function Earth({ sunRef }: { sunRef: React.RefObject<THREE.DirectionalLight> }) 
     }, undefined, () => {});
   }, [earthUniforms]);
 
-  useFrame((state) => {
-    const sun = getSunPosition();
+  useFrame((state, delta) => {
+    const { isPaused, timeScale, incrementSimulatedTime } = useAppStore.getState();
+    if (!isPaused) {
+      const clampedDelta = Math.min(delta, 0.1);
+      incrementSimulatedTime(clampedDelta * timeScale);
+    }
+
+    const simTime = useAppStore.getState().simulatedTime;
+    const simDate = new Date(simTime * 1000);
+    const sun = getSunPosition(simDate);
     const localDir = new THREE.Vector3(...sun.direction).normalize();
     const worldDir = localDir.clone().applyEuler(new THREE.Euler(0, -Math.PI / 2, 0.41));
     
     if (uniformsRef.current) {
       uniformsRef.current.uSunDirection.value.copy(worldDir);
-      uniformsRef.current.uTime.value = state.clock.getElapsedTime();
+      uniformsRef.current.uTime.value = simTime;
     }
     if (atmUniformsRef.current) atmUniformsRef.current.uSunDirection.value.copy(worldDir);
     if (sunRef.current) sunRef.current.position.copy(worldDir.clone().multiplyScalar(50));
-    if (cloudsRef.current) cloudsRef.current.rotation.y += 0.0003;
-    if (meshRef.current) meshRef.current.rotation.y += 0.0001;
+    if (cloudsRef.current) cloudsRef.current.rotation.y = simTime * 0.00012;
+    if (cloudsRef2.current) cloudsRef2.current.rotation.y = -simTime * 0.00007;
+    if (meshRef.current) meshRef.current.rotation.y = 0;
   });
 
   return (
@@ -476,10 +470,16 @@ function Earth({ sunRef }: { sunRef: React.RefObject<THREE.DirectionalLight> }) 
         />
       </mesh>
 
-      {/* Clouds */}
+      {/* Clouds Layer 1 (Lower) */}
       <mesh ref={cloudsRef}>
         <sphereGeometry args={[EARTH_RADIUS * 1.005, 96, 48]} />
-        <meshPhongMaterial ref={cloudMatRef} map={procTextures.clouds} transparent opacity={0.35} depthWrite={false} side={THREE.DoubleSide} />
+        <meshPhongMaterial ref={cloudMatRef} map={procTextures.clouds} transparent opacity={0.32} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Clouds Layer 2 (Upper Volumetric approximation) */}
+      <mesh ref={cloudsRef2}>
+        <sphereGeometry args={[EARTH_RADIUS * 1.012, 64, 32]} />
+        <meshPhongMaterial map={procTextures.clouds} transparent opacity={0.15} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
 
       {/* Atmosphere glow */}
@@ -507,6 +507,8 @@ function AircraftLayer() {
   const setHoveredEntity = useAppStore(s => s.setHoveredEntity);
   const selectedId = useAppStore(s => s.selectedAircraftId);
   const realisticColors = useAppStore(s => s.realisticColors);
+  const isPaused = useAppStore(s => s.isPaused);
+  const timeScale = useAppStore(s => s.timeScale);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const clickMeshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -538,8 +540,8 @@ function AircraftLayer() {
     for (let i = 0; i < count; i++) {
       const ac = filteredAircraft[i];
       
-      // Interpolate position smoothly based on actual speed and heading
-      const elapsedSec = Math.min((Date.now() - ac.lastUpdate) / 1000, 4); // clamp to prevent jumps on tab focus
+      // Interpolate position smoothly based on actual speed, heading, and simulation speed
+      const elapsedSec = isPaused ? 0 : Math.min(((Date.now() - ac.lastUpdate) / 1000) * timeScale, 4 * timeScale); // clamp to prevent jumps on tab focus
       const speedDeg = (ac.speed / 111320) * elapsedSec;
       const headingRad = (ac.heading * Math.PI) / 180;
       
@@ -663,6 +665,8 @@ function AircraftLayer() {
 function FlightRoutes() {
   const aircraft = useFlightStore(s => s.aircraft);
   const selectedId = useAppStore(s => s.selectedAircraftId);
+  const isPaused = useAppStore(s => s.isPaused);
+  const timeScale = useAppStore(s => s.timeScale);
 
   const selectedAircraft = useMemo(() => {
     if (!selectedId) return null;
@@ -689,7 +693,7 @@ function FlightRoutes() {
     if (!selectedAircraft || !routeDetails) return;
 
     // Calculate current interpolated position of selected flight
-    const elapsedSec = Math.min((Date.now() - selectedAircraft.lastUpdate) / 1000, 4);
+    const elapsedSec = isPaused ? 0 : Math.min(((Date.now() - selectedAircraft.lastUpdate) / 1000) * timeScale, 4 * timeScale);
     const speedDeg = (selectedAircraft.speed / 111320) * elapsedSec;
     const headingRad = (selectedAircraft.heading * Math.PI) / 180;
     
@@ -833,25 +837,70 @@ function SelectedFlightMarkers() {
   );
 }
 
-/* ================================================================
-   AURORA RINGS
-   ================================================================ */
+const auroraVertexShader = `
+  varying vec2 vUv;
+  varying vec3 vLocalPosition;
+  void main() {
+    vUv = uv;
+    vLocalPosition = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const auroraFragmentShader = `
+  varying vec2 vUv;
+  varying vec3 vLocalPosition;
+  uniform float uTime;
+  uniform vec3 uColor;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+
+  void main() {
+    float dist = length(vLocalPosition.xy);
+    float alphaFade = smoothstep(1.1, 1.3, dist) * smoothstep(1.9, 1.6, dist);
+    float angle = atan(vLocalPosition.y, vLocalPosition.x);
+    float wave = noise(vec2(angle * 8.0 + uTime * 0.4, dist * 5.0 - uTime * 0.2));
+    wave += noise(vec2(angle * 16.0 - uTime * 0.6, dist * 10.0)) * 0.5;
+    vec3 col = mix(uColor, vec3(0.5, 0.0, 0.9), wave * 0.5);
+    gl_FragColor = vec4(col, alphaFade * (0.05 + wave * 0.3) * 0.7);
+  }
+`;
+
 function AuroraRings() {
   const showAuroras = useAppStore(s => s.showAuroras);
   const ringRefNorth = useRef<THREE.Mesh>(null);
   const ringRefSouth = useRef<THREE.Mesh>(null);
 
+  const uniformsNorth = useMemo(() => ({
+    uTime: { value: 0 },
+    uColor: { value: new THREE.Color('#00ff88') },
+  }), []);
+
+  const uniformsSouth = useMemo(() => ({
+    uTime: { value: 0 },
+    uColor: { value: new THREE.Color('#8b5cf6') },
+  }), []);
+
   useFrame((state) => {
-    const elapsed = state.clock.getElapsedTime();
+    const simTime = useAppStore.getState().simulatedTime;
+    
     if (ringRefNorth.current) {
-      ringRefNorth.current.rotation.z = elapsed * 0.08;
-      const pulsate = 1.0 + Math.sin(elapsed * 2.0) * 0.05;
-      ringRefNorth.current.scale.set(pulsate, pulsate, 1.0);
+      ringRefNorth.current.rotation.z = simTime * 0.03;
+      uniformsNorth.uTime.value = simTime;
     }
     if (ringRefSouth.current) {
-      ringRefSouth.current.rotation.z = -elapsed * 0.07;
-      const pulsate = 1.0 + Math.cos(elapsed * 1.8) * 0.04;
-      ringRefSouth.current.scale.set(pulsate, pulsate, 1.0);
+      ringRefSouth.current.rotation.z = -simTime * 0.025;
+      uniformsSouth.uTime.value = simTime;
     }
   });
 
@@ -861,11 +910,25 @@ function AuroraRings() {
     <group>
       <mesh ref={ringRefNorth} position={[0, EARTH_RADIUS * 0.94, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <ringGeometry args={[EARTH_RADIUS * 0.22, EARTH_RADIUS * 0.38, 64]} />
-        <meshBasicMaterial color="#00ff88" transparent opacity={0.22} side={THREE.DoubleSide} depthWrite={false} />
+        <shaderMaterial
+          vertexShader={auroraVertexShader}
+          fragmentShader={auroraFragmentShader}
+          uniforms={uniformsNorth}
+          transparent
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
       </mesh>
       <mesh ref={ringRefSouth} position={[0, -EARTH_RADIUS * 0.94, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <ringGeometry args={[EARTH_RADIUS * 0.22, EARTH_RADIUS * 0.38, 64]} />
-        <meshBasicMaterial color="#8b5cf6" transparent opacity={0.18} side={THREE.DoubleSide} depthWrite={false} />
+        <shaderMaterial
+          vertexShader={auroraVertexShader}
+          fragmentShader={auroraFragmentShader}
+          uniforms={uniformsSouth}
+          transparent
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   );
@@ -1029,7 +1092,7 @@ function CoverageCone() {
 
   useFrame(() => {
     if (!selectedSat || !groupRef.current) return;
-    const t = Date.now() / 1000;
+    const t = useAppStore.getState().simulatedTime;
     const { lat, lon } = getSatellitePositionAtTime(selectedSat, t);
     const satDist = EARTH_RADIUS + (selectedSat.altitude / 6371) * EARTH_RADIUS * 0.6;
     const maxDistance = Math.min(satDist, EARTH_RADIUS * 2.5);
@@ -1109,7 +1172,7 @@ function SignalBeam() {
 
   const lineObject = useMemo(() => {
     if (!selectedSat || !nearestAirport) return null;
-    const t = Date.now() / 1000;
+    const t = useAppStore.getState().simulatedTime;
     const { lat, lon } = getSatellitePositionAtTime(selectedSat, t);
     const satDist = EARTH_RADIUS + (selectedSat.altitude / 6371) * EARTH_RADIUS * 0.6;
     const maxDistance = Math.min(satDist, EARTH_RADIUS * 2.5);
@@ -1140,38 +1203,65 @@ function SignalBeam() {
 }
 
 /* ================================================================
-   AIRPORT MARKERS
+   AIRPORT BEACONS (pulsing traffic score indicators)
    ================================================================ */
-function AirportMarkers() {
+function AirportBeacons() {
+  const selectedAirportCode = useAppStore(s => s.selectedAirportCode);
   const selectAirport = useAppStore(s => s.selectAirport);
   const setViewTarget = useAppStore(s => s.setViewTarget);
-  const selectedAirportCode = useAppStore(s => s.selectedAirportCode);
-  
-  const markers = useMemo(() => {
-    return Object.entries(AIRPORTS).map(([code, ap]) => ({
-      code,
-      name: ap.name,
-      pos: latLonToVec3(ap.lat, ap.lon, EARTH_RADIUS * 1.0012),
-    }));
+  const [pulse, setPulse] = useState(0);
+
+  useFrame((state) => {
+    setPulse((state.clock.getElapsedTime() * 1.2) % 1.0);
+  });
+
+  const beacons = useMemo(() => {
+    return Object.entries(AIRPORTS).map(([code, ap]) => {
+      const pos = latLonToVec3(ap.lat, ap.lon, EARTH_RADIUS * 1.0025);
+      const dir = new THREE.Vector3(...pos).normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+      
+      const seed = code.charCodeAt(0) + code.charCodeAt(1);
+      const score = (seed * 3) % 40 + 50; // 50 to 90
+      
+      return { code, name: ap.name, pos, quat, score };
+    });
   }, []);
 
   return (
     <group>
-      {markers.map(m => {
-        const isSelected = m.code === selectedAirportCode;
+      {beacons.map(b => {
+        const isSelected = b.code === selectedAirportCode;
+        const size = 0.05 + (b.score / 100) * 0.12;
+        
         return (
-          <mesh
-            key={m.code}
-            position={m.pos}
-            onClick={(e) => {
-              e.stopPropagation();
-              selectAirport(m.code);
-              setViewTarget({ lat: AIRPORTS[m.code].lat, lon: AIRPORTS[m.code].lon, entityId: m.code, entityType: 'airport' });
-            }}
-          >
-            <sphereGeometry args={[isSelected ? 0.038 : 0.022, 8, 8]} />
-            <meshBasicMaterial color={isSelected ? '#00d4ff' : '#94a3b8'} toneMapped={false} />
-          </mesh>
+          <group key={b.code} position={b.pos} quaternion={b.quat}>
+            {/* Concentric pulsing rings */}
+            <mesh scale={1.0 + pulse * 1.3}>
+              <ringGeometry args={[0.015, size * 0.65, 16]} />
+              <meshBasicMaterial 
+                color={isSelected ? '#00d4ff' : '#10b981'} 
+                transparent 
+                opacity={0.35 * (1.0 - pulse)} 
+                side={THREE.DoubleSide} 
+                depthWrite={false} 
+              />
+            </mesh>
+            
+            {/* Core beacon point */}
+            <mesh 
+              onClick={(e) => {
+                e.stopPropagation();
+                selectAirport(b.code);
+                setViewTarget({ lat: AIRPORTS[b.code].lat, lon: AIRPORTS[b.code].lon, entityId: b.code, entityType: 'airport' });
+              }}
+              onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
+              onPointerOut={() => { document.body.style.cursor = 'default'; }}
+            >
+              <sphereGeometry args={[isSelected ? 0.038 : 0.024, 8, 8]} />
+              <meshBasicMaterial color={isSelected ? '#00d4ff' : '#00ff88'} toneMapped={false} />
+            </mesh>
+          </group>
         );
       })}
     </group>
@@ -1195,7 +1285,7 @@ function SatelliteOrbitTrail3D() {
     const points = [];
     const steps = 128;
     const periodSec = selectedSat.period * 60;
-    const t = Date.now() / 1000;
+    const t = useAppStore.getState().simulatedTime;
     const satDist = EARTH_RADIUS + (selectedSat.altitude / 6371) * EARTH_RADIUS * 0.6;
     const maxDistance = Math.min(satDist, EARTH_RADIUS * 2.5);
 
@@ -1321,7 +1411,7 @@ function SatelliteLayer() {
 
   useFrame(() => {
     if (!meshRef.current || visibleSats.length === 0) return;
-    const t = Date.now() / 1000;
+    const t = useAppStore.getState().simulatedTime;
     const camDist = camera.position.length();
     const zoomFactor = Math.max(1.0, Math.min(5.5, camDist / (EARTH_RADIUS * 1.5)));
 
@@ -1340,7 +1430,17 @@ function SatelliteLayer() {
       
       const isISS = sat.category === 'iss';
       const baseScale = isISS ? 0.24 : sat.category === 'starlink' ? 0.08 : 0.15;
-      dummy.scale.setScalar(baseScale * zoomFactor);
+      
+      let finalScale = baseScale * zoomFactor;
+      if (camDist > EARTH_RADIUS * 4.5) {
+        if (sat.category === 'starlink') {
+          finalScale = sat.id === selectedId ? baseScale * 0.5 : 0.0;
+        } else if (!isISS && sat.id !== selectedId) {
+          finalScale = baseScale * 0.12 * zoomFactor;
+        }
+      }
+      
+      dummy.scale.setScalar(finalScale);
       dummy.updateMatrix();
       
       meshRef.current.setMatrixAt(i, dummy.matrix);
@@ -1425,7 +1525,7 @@ function SatelliteLayer() {
           if (idx !== undefined && visibleSats[idx]) {
             const sat = visibleSats[idx];
             selectSatellite(sat.id);
-            const t = Date.now() / 1000;
+            const t = useAppStore.getState().simulatedTime;
             const posAtT = getSatellitePositionAtTime(sat, t);
             setViewTarget({ lat: posAtT.lat, lon: posAtT.lon, entityId: sat.id, entityType: 'satellite' });
           }
@@ -1577,7 +1677,7 @@ function SatelliteFootprints() {
     }
 
     if (groupRef.current) {
-      const t = Date.now() / 1000;
+      const t = useAppStore.getState().simulatedTime;
       const { lat, lon } = getSatellitePositionAtTime(selectedSat, t);
       const targetDir = new THREE.Vector3(...latLonToVec3(lat, lon, 1)).normalize();
       const alignQuaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), targetDir);
@@ -1652,7 +1752,7 @@ function GroundTracks() {
   useFrame(() => {
     if (!selectedSat) return;
     
-    const t = Date.now() / 1000;
+    const t = useAppStore.getState().simulatedTime;
     const steps = 96;
     const periodSec = selectedSat.period * 60;
     const positions = lineObject.geometry.attributes.position.array as Float32Array;
@@ -1814,6 +1914,68 @@ function CameraController() {
 }
 
 /* ================================================================
+   WIND PARTICLES SIMULATION
+   ================================================================ */
+function WindParticles() {
+  const showWeather = useAppStore(s => s.showWeather);
+  const weatherLayerMode = useAppStore(s => s.weatherLayerMode);
+  const isPaused = useAppStore(s => s.isPaused);
+  const timeScale = useAppStore(s => s.timeScale);
+  const pointsRef = useRef<THREE.Points>(null);
+  
+  const count = 500;
+  const [positions, speeds, initialCoords] = useMemo(() => {
+    const pos = new Float32Array(count * 3);
+    const sp = new Float32Array(count);
+    const init = [];
+    for (let i = 0; i < count; i++) {
+      const lat = (Math.random() - 0.5) * 140; // avoid polar extremes
+      const lon = Math.random() * 360 - 180;
+      const speed = 1.0 + Math.random() * 2.0; // deg/frame
+      init.push({ lat, lon });
+      sp[i] = speed;
+      
+      const p = latLonToVec3(lat, lon, EARTH_RADIUS * 1.02);
+      pos[i * 3] = p[0];
+      pos[i * 3 + 1] = p[1];
+      pos[i * 3 + 2] = p[2];
+    }
+    return [pos, sp, init];
+  }, []);
+
+  useFrame(() => {
+    if (!pointsRef.current || !showWeather || weatherLayerMode !== 'wind') return;
+    const positionsAttr = pointsRef.current.geometry.attributes.position;
+    const posArr = positionsAttr.array as Float32Array;
+    const elapsed = isPaused ? 0 : 0.005 * timeScale;
+    
+    for (let i = 0; i < count; i++) {
+      initialCoords[i].lon += speeds[i] * elapsed * 2.0;
+      if (initialCoords[i].lon > 180) initialCoords[i].lon -= 360;
+      
+      const waveLat = initialCoords[i].lat + Math.sin(initialCoords[i].lon * 0.05) * 5.0;
+      
+      const p = latLonToVec3(waveLat, initialCoords[i].lon, EARTH_RADIUS * 1.015);
+      posArr[i * 3] = p[0];
+      posArr[i * 3 + 1] = p[1];
+      posArr[i * 3 + 2] = p[2];
+    }
+    positionsAttr.needsUpdate = true;
+  });
+
+  if (!showWeather || weatherLayerMode !== 'wind') return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial color="#00e5ff" size={0.035} transparent opacity={0.65} depthWrite={false} />
+    </points>
+  );
+}
+
+/* ================================================================
    SCENE COMPOSITION
    ================================================================ */
 function Scene() {
@@ -1828,13 +1990,14 @@ function Scene() {
         <Earth sunRef={sunRef} />
         <AuroraRings />
         <WeatherLayerMesh />
+        <WindParticles />
         <LightningBolt />
         
         <FlightHeatmapLayer />
         <AircraftLayer />
         <FlightRoutes />
         <SelectedFlightMarkers />
-        <AirportMarkers />
+        <AirportBeacons />
         
         <SatelliteLayer />
         <SatelliteOrbitTrail3D />
