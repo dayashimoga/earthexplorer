@@ -650,11 +650,113 @@ function RocketLab({ onClose }: { onClose: () => void }) {
 /* ================================================================
    AI TUTOR
    ================================================================ */
+/* ================================================================
+   ACADEMY LESSONS DATABASE
+   ================================================================ */
+const ACADEMY_LESSONS = [
+  {
+    id: 'aviation',
+    subject: 'Aviation',
+    icon: '✈️',
+    description: 'Learn about flight dynamics, lift, drag, air density, and altitude.',
+    observe: 'Select any active aircraft on the globe to observe its speed, heading, and altitude.',
+    interact: 'Track commercial vs cargo flights. Watch their altitude relative to mountains.',
+    experiment: 'Open Flight Lab to manipulate velocity and air density to see when lift sustains flight.',
+    challenge: 'Try flying at FL410 (41,000 ft) without stalling the aircraft.',
+    action: { type: 'panel', target: 'flights' }
+  },
+  {
+    id: 'satellites',
+    subject: 'Satellites',
+    icon: '🛰️',
+    description: 'Explore the different types of satellites orbiting Earth.',
+    observe: 'Observe LEO, MEO, and GEO satellites moving at different speeds on the globe.',
+    interact: 'Toggle the Starlink constellation to see how low earth orbit megaconstellations cover the earth.',
+    experiment: 'Adjust orbital velocity and altitude to see how it affects satellite trajectory.',
+    challenge: 'Locate a weather satellite and track it as it passes over your continent.',
+    action: { type: 'panel', target: 'satellites' }
+  },
+  {
+    id: 'gps',
+    subject: 'GPS',
+    icon: '🔵',
+    description: 'Understand trilateration and global positioning constellations.',
+    observe: 'Look at the MEO orbital band where GPS, Galileo, and GLONASS reside.',
+    interact: 'Select a GPS satellite and see its signal coverage footprint on the Earth.',
+    experiment: 'Determine how many satellites are visible from a single point for successful trilateration.',
+    challenge: 'Unlock the GPS mission in the Mission Control panel.',
+    action: { type: 'panel', target: 'missions' }
+  },
+  {
+    id: 'navigation',
+    subject: 'Navigation',
+    icon: '🧭',
+    description: 'Discover how aircraft navigate across great-circle routes.',
+    observe: 'Observe how flights follow curved flight path corridors (great circles) rather than straight lines.',
+    interact: 'Trace the historical trail and remaining path of a long-haul commercial flight.',
+    experiment: 'Compare route length between different cities using the search bar.',
+    challenge: 'Search for airport DXB (Dubai) and inspect its heavy arrival/departure traffic.',
+    action: { type: 'panel', target: 'flights' }
+  },
+  {
+    id: 'weather',
+    subject: 'Weather',
+    icon: '🌦️',
+    description: 'Study atmospheric pressure, temperature, cloud cover, and winds.',
+    observe: 'Toggle cloud layers and temperature maps on the 3D globe.',
+    interact: 'Examine pressure vectors and cyclones rotating around the Earth.',
+    experiment: 'Use the Weather Lab to simulate a category 5 hurricane by lowering pressure.',
+    challenge: 'Analyze pressure patterns on the weather map to locate high-pressure systems.',
+    action: { type: 'panel', target: 'weather' }
+  },
+  {
+    id: 'rockets',
+    subject: 'Rockets',
+    icon: '🚀',
+    description: 'Master rocket staging, thrust-to-weight ratio, and orbit insertion.',
+    observe: 'Observe how a rocket requires immense velocity to stay in orbit without falling back.',
+    interact: 'Simulate thrust controls and flight angle to reach outer space.',
+    experiment: 'Open the Rocket Lab to test staging configurations and pitch angles.',
+    challenge: 'Reach a stable orbit above 200 km in the Rocket Lab simulator.',
+    action: { type: 'panel', target: 'labs' }
+  },
+  {
+    id: 'communications',
+    subject: 'Communications',
+    icon: '📶',
+    description: 'Learn about latency, signal beams, and coverage footprints.',
+    observe: 'Watch communications satellites beam signals to ground stations.',
+    interact: 'Select a communication satellite to view its active ground coverage cone.',
+    experiment: 'Calculate the ground coverage percentage based on satellite altitude.',
+    challenge: 'Track an Iridium satellite and view its inclination relative to the equator.',
+    action: { type: 'panel', target: 'satellites' }
+  },
+  {
+    id: 'space',
+    subject: 'Space Exploration',
+    icon: '🧑‍🚀',
+    description: 'Track the ISS and explore escape velocity for deep space travel.',
+    observe: 'Track the International Space Station in real time in ISS Mode.',
+    interact: 'Switch to ISS Chase Cam to view Earth from the station\'s perspective.',
+    experiment: 'Compute escape velocity vs orbital velocity in the Orbit Simulator.',
+    challenge: 'Calculate the next ISS pass over New York (JFK).',
+    action: { type: 'panel', target: 'iss' }
+  }
+];
+
+/* ================================================================
+   AI TUTOR & ACADEMY PANEL
+   ================================================================ */
 export function AcademyPanel() {
+  const [activeTab, setActiveTab] = useState<'lessons' | 'tutor'>('tutor');
+  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+
   const tutorMode = useUserStore(s => s.tutorMode);
   const setTutorMode = useUserStore(s => s.setTutorMode);
   const tutorMessages = useUserStore(s => s.tutorMessages);
   const addTutorMessage = useUserStore(s => s.addTutorMessage);
+  const addXP = useUserStore(s => s.addXP);
+  const unlockAchievement = useUserStore(s => s.unlockAchievement);
   const [input, setInput] = useState('');
 
   const modes: { id: TutorMode; label: string; icon: string }[] = [
@@ -672,9 +774,50 @@ export function AcademyPanel() {
     addTutorMessage({ id: Date.now().toString(), role: 'user', content: msg, timestamp: Date.now() });
     const response = getAITutorResponse(msg, tutorMode);
     setTimeout(() => {
-      addTutorMessage({ id: (Date.now() + 1).toString(), role: 'tutor', content: response, timestamp: Date.now() });
+      addTutorMessage({
+        id: (Date.now() + 1).toString(),
+        role: 'tutor',
+        content: response.content,
+        timestamp: Date.now(),
+        globeAction: response.globeAction,
+      });
+
+      // Apply globe action if present
+      if (response.globeAction) {
+        const { command, targetId, targetType, lat, lon } = response.globeAction;
+        const appStore = useAppStore.getState();
+        if (command === 'fly-to') {
+          if (targetType === 'satellite' && targetId) {
+            appStore.selectSatellite(targetId);
+            if (lat !== undefined && lon !== undefined) {
+              appStore.setViewTarget({ lat, lon, entityId: targetId, entityType: 'satellite' });
+            }
+          } else if (lat !== undefined && lon !== undefined) {
+            appStore.setViewTarget({ lat, lon, entityId: targetId, entityType: targetType as any });
+          }
+        } else if (command === 'highlight') {
+          if (targetType === 'satellite' && targetId) {
+            appStore.selectSatellite(targetId);
+          } else if (targetType === 'aircraft' && targetId) {
+            appStore.selectAircraft(targetId);
+          }
+        } else if (command === 'orbit-view') {
+          appStore.setCameraMode('orbit');
+          if (!appStore.showOrbits) appStore.toggleLayer('showOrbits');
+        }
+      }
     }, 500);
     setInput('');
+  };
+
+  const selectedLesson = useMemo(() => 
+    ACADEMY_LESSONS.find(l => l.id === selectedLessonId), [selectedLessonId]);
+
+  const handleLessonAction = (lesson: typeof ACADEMY_LESSONS[0]) => {
+    const appStore = useAppStore.getState();
+    if (lesson.action.type === 'panel') {
+      appStore.setActivePanel(lesson.action.target as any);
+    }
   };
 
   return (
@@ -683,64 +826,171 @@ export function AcademyPanel() {
         <div className="panel-title">📚 AI Tutor</div>
       </div>
 
-      {/* Mode selector */}
-      <div className="tab-bar">
-        {modes.map(m => (
-          <button key={m.id} className={`tab-btn ${tutorMode === m.id ? 'active' : ''}`}
-            onClick={() => setTutorMode(m.id)} style={{ fontSize: 12 }}>
-            {m.icon} {m.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16, minHeight: 200 }}>
-        {tutorMessages.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🤖</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#f1f5f9', marginBottom: 8 }}>
-              Welcome to the AI Tutor!
-            </div>
-            <div style={{ fontSize: 13, marginBottom: 16 }}>
-              Ask me anything about space, satellites, aircraft, or orbital mechanics.
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {suggestedTopics.map(topic => (
-                <button key={topic} className="btn-secondary" style={{ fontSize: 12, padding: '8px 12px' }}
-                  onClick={() => handleSend(topic)}>
-                  {topic}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {tutorMessages.map(msg => (
-          <div key={msg.id} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            {msg.role === 'tutor' ? (
-              <div className="tutor-bubble">{msg.content}</div>
-            ) : (
-              <div style={{
-                padding: '10px 16px', borderRadius: '14px 14px 4px 14px',
-                background: 'rgba(0, 212, 255, 0.15)', border: '1px solid rgba(0,212,255,0.2)',
-                maxWidth: '80%', fontSize: 14,
-              }}>
-                {msg.content}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Input */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input className="tutor-input" placeholder="Ask a question..."
-          value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSend()} />
-        <button className="btn-primary" style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}
-          onClick={() => handleSend()}>
-          Send
+      {/* Main switch between Lessons and AI Tutor */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button
+          className={`btn-secondary ${activeTab === 'lessons' ? 'active' : ''}`}
+          style={{ flex: 1, padding: '10px 0', fontSize: 13, fontWeight: 700 }}
+          onClick={() => setActiveTab('lessons')}
+        >
+          📖 Lessons
+        </button>
+        <button
+          className={`btn-secondary ${activeTab === 'tutor' ? 'active' : ''}`}
+          style={{ flex: 1, padding: '10px 0', fontSize: 13, fontWeight: 700 }}
+          onClick={() => setActiveTab('tutor')}
+        >
+          🤖 AI Tutor
         </button>
       </div>
+
+      {activeTab === 'lessons' && (
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {!selectedLesson ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {ACADEMY_LESSONS.map(lesson => (
+                <div
+                  key={lesson.id}
+                  className="mission-card active"
+                  style={{ padding: 14 }}
+                  onClick={() => setSelectedLessonId(lesson.id)}
+                >
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <span style={{ fontSize: 24 }}>{lesson.icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700 }}>{lesson.subject}</div>
+                      <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{lesson.description}</div>
+                    </div>
+                    <span style={{ fontSize: 16 }}>➔</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <button className="btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setSelectedLessonId(null)}>
+                  🠔 Back to Lessons
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 20 }}>{selectedLesson.icon}</span>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>{selectedLesson.subject}</span>
+                </div>
+              </div>
+
+              {/* Observe */}
+              <div className="glass-card" style={{ padding: 14, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#00d4ff', textTransform: 'uppercase', marginBottom: 4 }}>1. Observe</div>
+                <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5, marginBottom: 8 }}>{selectedLesson.observe}</div>
+                <button className="btn-secondary" style={{ width: '100%', fontSize: 11, padding: '6px' }} onClick={() => handleLessonAction(selectedLesson)}>
+                  🔍 Launch View
+                </button>
+              </div>
+
+              {/* Interact */}
+              <div className="glass-card" style={{ padding: 14, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#ff6b35', textTransform: 'uppercase', marginBottom: 4 }}>2. Interact</div>
+                <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5, marginBottom: 8 }}>{selectedLesson.interact}</div>
+                <button className="btn-secondary" style={{ width: '100%', fontSize: 11, padding: '6px' }} onClick={() => handleLessonAction(selectedLesson)}>
+                  🛰️ Interact on Globe
+                </button>
+              </div>
+
+              {/* Experiment */}
+              <div className="glass-card" style={{ padding: 14, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', marginBottom: 4 }}>3. Experiment</div>
+                <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5, marginBottom: 8 }}>{selectedLesson.experiment}</div>
+                <button className="btn-secondary" style={{ width: '100%', fontSize: 11, padding: '6px' }} onClick={() => handleLessonAction(selectedLesson)}>
+                  🔬 Run Experiment
+                </button>
+              </div>
+
+              {/* Challenge */}
+              <div className="glass-card" style={{ padding: 14, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#eab308', textTransform: 'uppercase', marginBottom: 4 }}>4. Challenge</div>
+                <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>{selectedLesson.challenge}</div>
+              </div>
+
+              {/* Master */}
+              <div className="glass-card" style={{ padding: 16, marginBottom: 14, background: 'rgba(16, 185, 129, 0.08)', borderColor: 'rgba(16, 185, 129, 0.2)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', marginBottom: 4 }}>5. Master</div>
+                <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5, marginBottom: 10 }}>Ready to prove you mastered this subject?</div>
+                <button className="btn-primary" style={{ width: '100%', background: '#10b981', borderColor: '#10b981' }}
+                  onClick={() => {
+                    addXP(50);
+                    unlockAchievement(`academy-${selectedLesson.id}`);
+                    alert(`Congratulations! You mastered ${selectedLesson.subject} and earned +50 XP!`);
+                  }}>
+                  🏆 Complete Subject
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'tutor' && (
+        <>
+          {/* Mode selector */}
+          <div className="tab-bar" style={{ marginBottom: 10 }}>
+            {modes.map(m => (
+              <button key={m.id} className={`tab-btn ${tutorMode === m.id ? 'active' : ''}`}
+                onClick={() => setTutorMode(m.id)} style={{ fontSize: 12 }}>
+                {m.icon} {m.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16, minHeight: 200 }}>
+            {tutorMessages.length === 0 && (
+              <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8' }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>🤖</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#f1f5f9', marginBottom: 8 }}>
+                  Welcome to the AI Tutor!
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 16 }}>
+                  Ask me anything about space, satellites, aircraft, or orbital mechanics.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {suggestedTopics.map(topic => (
+                    <button key={topic} className="btn-secondary" style={{ fontSize: 12, padding: '8px 12px' }}
+                      onClick={() => handleSend(topic)}>
+                      {topic}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {tutorMessages.map(msg => (
+              <div key={msg.id} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                {msg.role === 'tutor' ? (
+                  <div className="tutor-bubble">{msg.content}</div>
+                ) : (
+                  <div style={{
+                    padding: '10px 16px', borderRadius: '14px 14px 4px 14px',
+                    background: 'rgba(0, 212, 255, 0.15)', border: '1px solid rgba(0,212,255,0.2)',
+                    maxWidth: '80%', fontSize: 14,
+                  }}>
+                    {msg.content}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Input */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="tutor-input" placeholder="Ask a question..."
+              value={input} onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()} />
+            <button className="btn-primary" style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}
+              onClick={() => handleSend()}>
+              Send
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

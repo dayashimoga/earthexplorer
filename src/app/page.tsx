@@ -170,6 +170,8 @@ function LayerToggles() {
   const showOrbits = useAppStore(s => s.showOrbits);
   const showWeather = useAppStore(s => s.showWeather);
   const realisticColors = useAppStore(s => s.realisticColors);
+  const showAuroras = useAppStore(s => s.showAuroras);
+  const showHeatmap = useAppStore(s => s.showHeatmap);
 
   const layers = [
     { key: 'showFlights', label: 'Flights', icon: '✈️', active: showFlights },
@@ -178,13 +180,15 @@ function LayerToggles() {
     { key: 'showISS', label: 'ISS', icon: '🏠', active: showISS },
     { key: 'showOrbits', label: 'Orbits', icon: '⭕', active: showOrbits },
     { key: 'showWeather', label: 'Weather', icon: '☁️', active: showWeather },
+    { key: 'showAuroras', label: 'Auroras', icon: '🌌', active: showAuroras },
+    { key: 'showHeatmap', label: 'Heatmap', icon: '🔥', active: showHeatmap },
     { key: 'realisticColors', label: 'Realistic Style', icon: '🎨', active: realisticColors },
   ];
 
   return (
     <div style={{
       position: 'fixed', bottom: 48, left: 84, zIndex: 80,
-      display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 300,
+      display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 450,
     }}>
       {layers.map(l => (
         <button

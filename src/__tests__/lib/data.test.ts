@@ -363,55 +363,62 @@ describe('ACHIEVEMENTS', () => {
    ================================================================ */
 describe('getAITutorResponse', () => {
   it('responds to orbit-related queries', () => {
-    const resp = getAITutorResponse('How do orbits work?', 'student');
-    expect(resp).toBeTruthy();
-    expect(resp.length).toBeGreaterThan(20);
+    const { content, globeAction } = getAITutorResponse('How do orbits work?', 'student');
+    expect(content).toBeTruthy();
+    expect(content.length).toBeGreaterThan(20);
+    expect(globeAction?.command).toBe('orbit-view');
   });
 
   it('responds differently for each mode', () => {
     const kids = getAITutorResponse('Tell me about satellites', 'kids');
     const expert = getAITutorResponse('Tell me about satellites', 'expert');
-    expect(kids).not.toBe(expert);
-    expect(kids).toContain('🛰️'); // Kids mode uses emojis
+    expect(kids.content).not.toBe(expert.content);
+    expect(kids.content).toContain('🛰️'); // Kids mode uses emojis
   });
 
   it('handles all tutor modes', () => {
     for (const mode of ['kids', 'student', 'enthusiast', 'expert']) {
-      const resp = getAITutorResponse('orbit', mode);
-      expect(resp).toBeTruthy();
-      expect(resp.length).toBeGreaterThan(10);
+      const { content } = getAITutorResponse('orbit', mode);
+      expect(content).toBeTruthy();
+      expect(content.length).toBeGreaterThan(10);
     }
   });
 
   it('handles GPS queries', () => {
-    const resp = getAITutorResponse('How does GPS navigation work?', 'student');
-    expect(resp.toLowerCase()).toContain('gps');
+    const { content, globeAction } = getAITutorResponse('How does GPS navigation work?', 'student');
+    expect(content.toLowerCase()).toContain('gps');
+    expect(globeAction?.command).toBe('highlight');
+    expect(globeAction?.targetType).toBe('satellite');
   });
 
   it('handles ISS queries', () => {
-    const resp = getAITutorResponse('Tell me about the ISS', 'student');
-    expect(resp).toBeTruthy();
-    expect(resp.length).toBeGreaterThan(20);
+    const { content, globeAction } = getAITutorResponse('Tell me about the ISS', 'student');
+    expect(content).toBeTruthy();
+    expect(content.length).toBeGreaterThan(20);
+    expect(globeAction?.command).toBe('fly-to');
+    expect(globeAction?.targetId).toBe('ISS');
   });
 
   it('handles weather queries', () => {
-    const resp = getAITutorResponse('How do weather satellites work?', 'enthusiast');
-    expect(resp).toBeTruthy();
+    const { content, globeAction } = getAITutorResponse('How do weather satellites work?', 'enthusiast');
+    expect(content).toBeTruthy();
+    expect(globeAction?.command).toBe('highlight');
   });
 
   it('handles rocket queries', () => {
-    const resp = getAITutorResponse('Tell me about rocket engines', 'expert');
-    expect(resp).toBeTruthy();
+    const { content, globeAction } = getAITutorResponse('Tell me about rocket engines', 'expert');
+    expect(content).toBeTruthy();
+    expect(globeAction?.command).toBe('fly-to');
   });
 
   it('returns fallback for unknown queries', () => {
-    const resp = getAITutorResponse('random gibberish xyzzy', 'student');
-    expect(resp).toBeTruthy();
-    expect(resp).toContain('expertise');
+    const { content } = getAITutorResponse('random gibberish xyzzy', 'student');
+    expect(content).toBeTruthy();
+    expect(content).toContain('expertise');
   });
 
   it('returns kid-friendly fallback for unknown queries', () => {
-    const resp = getAITutorResponse('random gibberish', 'kids');
-    expect(resp).toContain('🤔');
+    const { content } = getAITutorResponse('random gibberish', 'kids');
+    expect(content).toContain('🤔');
   });
 });

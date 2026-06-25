@@ -1,7 +1,7 @@
 'use client';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Aircraft, Satellite, ActivePanel, CameraMode, ViewTarget, UserProgress, UserRank, TutorMessage, TutorMode } from '@/types';
+import type { Aircraft, Satellite, ActivePanel, CameraMode, ViewTarget, UserProgress, UserRank, TutorMessage, TutorMode, WeatherLayerMode } from '@/types';
 
 /* ===== APP STORE ===== */
 interface AppState {
@@ -12,6 +12,9 @@ interface AppState {
   viewTarget: ViewTarget | null;
   selectedAircraftId: string | null;
   selectedSatelliteId: string | null;
+  selectedAirportCode: string | null;
+  hoveredEntityId: string | null;
+  hoveredEntityType: 'aircraft' | 'satellite' | null;
   showLabels: boolean;
   showOrbits: boolean;
   showWeather: boolean;
@@ -19,6 +22,10 @@ interface AppState {
   showSatellites: boolean;
   showStarlink: boolean;
   showISS: boolean;
+  showAuroras: boolean;
+  showHeatmap: boolean;
+  showWindVectors: boolean;
+  weatherLayerMode: WeatherLayerMode;
   timeScale: number;
   searchQuery: string;
   realisticColors: boolean;
@@ -29,6 +36,9 @@ interface AppState {
   setViewTarget: (t: ViewTarget | null) => void;
   selectAircraft: (id: string | null) => void;
   selectSatellite: (id: string | null) => void;
+  selectAirport: (code: string | null) => void;
+  setHoveredEntity: (id: string | null, type: 'aircraft' | 'satellite' | null) => void;
+  setWeatherLayerMode: (m: WeatherLayerMode) => void;
   toggleLayer: (layer: string) => void;
   setSearchQuery: (q: string) => void;
   setTimeScale: (s: number) => void;
@@ -39,9 +49,12 @@ export const useAppStore = create<AppState>((set) => ({
   activePanel: 'none',
   cameraMode: 'orbit',
   viewTarget: null,
-  selectedAircraftId: null, selectedSatelliteId: null,
+  selectedAircraftId: null, selectedSatelliteId: null, selectedAirportCode: null,
+  hoveredEntityId: null, hoveredEntityType: null,
   showLabels: true, showOrbits: true, showWeather: true,
   showFlights: true, showSatellites: true, showStarlink: false, showISS: true,
+  showAuroras: true, showHeatmap: false, showWindVectors: true,
+  weatherLayerMode: 'clouds',
   timeScale: 1, searchQuery: '',
   realisticColors: false,
   setLoaded: (v) => set({ loaded: v }),
@@ -49,8 +62,11 @@ export const useAppStore = create<AppState>((set) => ({
   setActivePanel: (p) => set((s) => ({ activePanel: s.activePanel === p ? 'none' : p })),
   setCameraMode: (m) => set({ cameraMode: m }),
   setViewTarget: (t) => set({ viewTarget: t }),
-  selectAircraft: (id) => set({ selectedAircraftId: id, activePanel: id ? 'flights' : 'none' }),
-  selectSatellite: (id) => set({ selectedSatelliteId: id, activePanel: id ? 'satellites' : 'none' }),
+  selectAircraft: (id) => set({ selectedAircraftId: id, selectedSatelliteId: null, selectedAirportCode: null, activePanel: id ? 'flights' : 'none' }),
+  selectSatellite: (id) => set({ selectedSatelliteId: id, selectedAircraftId: null, selectedAirportCode: null, activePanel: id ? 'satellites' : 'none' }),
+  selectAirport: (code) => set({ selectedAirportCode: code, selectedAircraftId: null, selectedSatelliteId: null, activePanel: code ? 'airport' : 'none' }),
+  setHoveredEntity: (id, type) => set({ hoveredEntityId: id, hoveredEntityType: type }),
+  setWeatherLayerMode: (m) => set({ weatherLayerMode: m }),
   toggleLayer: (layer) => set((s) => ({ ...s, [layer]: !(s as any)[layer] })),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setTimeScale: (s) => set({ timeScale: s }),
