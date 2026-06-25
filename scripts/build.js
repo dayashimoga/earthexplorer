@@ -15,7 +15,8 @@ try {
   }
 
   console.log('Running next build...');
-  execSync('npx cross-env NEXT_EXPORT=true next build', { stdio: 'inherit' });
+  process.env.NEXT_EXPORT = 'true';
+  execSync('npx next build', { stdio: 'inherit' });
 } finally {
   if (apiMoved && fs.existsSync(tempApiPath)) {
     fs.renameSync(tempApiPath, apiPath);
