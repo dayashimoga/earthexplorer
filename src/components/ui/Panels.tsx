@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, useFlightStore, useSatelliteStore, useUserStore } from '@/stores/stores';
+import { calculateCoverage, getNextPassTime, generateAirportTraffic, latLonToVec3, AIRPORTS } from '@/lib/data';
 import type { ActivePanel, Aircraft, Satellite } from '@/types';
+import * as THREE from 'three';
 
 /* ================================================================
    ICONS (SVG inline for zero dependencies)
@@ -79,6 +81,17 @@ export function HUD() {
     setSearchQuery(q);
     if (q.length >= 2) {
       const ql = q.toLowerCase();
+      
+      // Match airports first
+      const airportMatch = Object.keys(AIRPORTS).find(code =>
+        code.toLowerCase().includes(ql) || AIRPORTS[code].name.toLowerCase().includes(ql)
+      );
+      if (airportMatch) {
+        useAppStore.getState().selectAirport(airportMatch);
+        useAppStore.getState().setViewTarget({ lat: AIRPORTS[airportMatch].lat, lon: AIRPORTS[airportMatch].lon, entityId: airportMatch, entityType: 'airport' });
+        return;
+      }
+
       const flightMatch = aircraft.some(a =>
         a.callsign.toLowerCase().includes(ql) || a.airline.toLowerCase().includes(ql) ||
         a.flightNumber.toLowerCase().includes(ql) || a.origin.toLowerCase().includes(ql) ||
@@ -214,6 +227,36 @@ function FlightPanel() {
           </div>
         </div>
 
+        {(() => {
+          const originCode = selectedAircraft.origin.substring(0, 3);
+          const destCode = selectedAircraft.destination.substring(0, 3);
+          const originAirport = AIRPORTS[originCode];
+          const destAirport = AIRPORTS[destCode];
+          let remainingDistKm = 0;
+          let remainingMinutes = 0;
+          let progressPct = 0;
+          if (originAirport && destAirport) {
+            const p1 = latLonToVec3(selectedAircraft.latitude, selectedAircraft.longitude, 6371);
+            const p2 = latLonToVec3(destAirport.lat, destAirport.lon, 6371);
+            remainingDistKm = Math.round(new THREE.Vector3(...p1).distanceTo(new THREE.Vector3(...p2)));
+            remainingMinutes = Math.round(remainingDistKm / (selectedAircraft.speed * 0.06));
+            const totalDist = Math.round(new THREE.Vector3(...latLonToVec3(originAirport.lat, originAirport.lon, 6371)).distanceTo(new THREE.Vector3(...latLonToVec3(destAirport.lat, destAirport.lon, 6371))));
+            progressPct = Math.max(0, Math.min(100, Math.round(((totalDist - remainingDistKm) / totalDist) * 100)));
+          }
+
+          return (
+            <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                <span>Remaining: {remainingDistKm} km</span>
+                <span>ETA: {remainingMinutes} mins</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="stat-grid">
           <div className="stat-card">
             <div className="stat-value">{Math.round(selectedAircraft.altitude).toLocaleString()}</div>
@@ -291,6 +334,46 @@ function FlightPanel() {
 }
 
 /* ================================================================
+   SATELLITE CATEGORY STYLES
+   ================================================================ */
+const categoryColors: Record<string, string> = {
+  gps: '#3b82f6', // Blue
+  galileo: '#3b82f6', // Blue
+  glonass: '#3b82f6', // Blue
+  beidou: '#3b82f6', // Blue
+  starlink: '#ffffff', // White
+  weather: '#10b981', // Green
+  'earth-observation': '#10b981', // Green
+  iss: '#f97316', // Orange
+  'space-station': '#f97316', // Orange
+  communication: '#8b5cf6', // Purple
+  scientific: '#eab308', // Yellow
+};
+
+function hexToRgb(hex: string): string {
+  const cleanHex = hex.replace('#', '');
+  if (cleanHex.length === 3) {
+    const r = parseInt(cleanHex[0] + cleanHex[0], 16);
+    const g = parseInt(cleanHex[1] + cleanHex[1], 16);
+    const b = parseInt(cleanHex[2] + cleanHex[2], 16);
+    return `${r}, ${g}, ${b}`;
+  }
+  const r = parseInt(cleanHex.substring(0, 2), 16);
+  const g = parseInt(cleanHex.substring(2, 4), 16);
+  const b = parseInt(cleanHex.substring(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
+function getCategoryBadgeStyle(category: string) {
+  const color = categoryColors[category] || '#94a3b8';
+  return {
+    background: `rgba(${hexToRgb(color)}, 0.15)`,
+    borderColor: color,
+    color: color
+  };
+}
+
+/* ================================================================
    SATELLITE PANEL
    ================================================================ */
 function SatellitePanel() {
@@ -331,11 +414,14 @@ function SatellitePanel() {
         </div>
 
         <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Outfit', color: '#7c3aed', marginBottom: 4 }}>{selectedSat.name}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Outfit', color: categoryColors[selectedSat.category] || '#7c3aed', marginBottom: 4 }}>{selectedSat.name}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <span className="rank-badge">{selectedSat.orbitType}</span>
             <span className="rank-badge" style={{ background: 'rgba(124,58,237,0.15)', borderColor: 'rgba(124,58,237,0.3)', color: '#7c3aed' }}>
               NORAD {selectedSat.noradId}
+            </span>
+            <span className="rank-badge" style={getCategoryBadgeStyle(selectedSat.category)}>
+              {selectedSat.category.toUpperCase()}
             </span>
           </div>
         </div>
@@ -356,6 +442,17 @@ function SatellitePanel() {
           <div className="stat-card">
             <div className="stat-value" style={{ color: '#7c3aed' }}>{Math.round(selectedSat.period)}</div>
             <div className="stat-label">Period (min)</div>
+          </div>
+        </div>
+
+        <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: '#7c3aed', fontSize: 18 }}>{calculateCoverage(selectedSat.altitude).toFixed(1)}%</div>
+            <div className="stat-label">Coverage</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: '#7c3aed', fontSize: 18 }}>{getNextPassTime(selectedSat.id, 'JFK')}</div>
+            <div className="stat-label">Next Pass (JFK)</div>
           </div>
         </div>
 
@@ -386,9 +483,9 @@ function SatellitePanel() {
       {/* Category overview */}
       <div className="stat-grid" style={{ marginBottom: 16 }}>
         {Object.entries(categoryCounts).slice(0, 6).map(([cat, count]) => (
-          <div key={cat} className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setFilterCategory(cat)}>
-            <div className="stat-value" style={{ fontSize: 20, color: '#7c3aed' }}>{count}</div>
-            <div className="stat-label">{cat}</div>
+          <div key={cat} className="stat-card" style={{ cursor: 'pointer', ...getCategoryBadgeStyle(cat) }} onClick={() => setFilterCategory(cat)}>
+            <div className="stat-value" style={{ fontSize: 20, color: 'inherit' }}>{count}</div>
+            <div className="stat-label" style={{ color: 'inherit' }}>{cat}</div>
           </div>
         ))}
       </div>
@@ -417,10 +514,10 @@ function SatellitePanel() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#7c3aed' }}>{sat.name}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: categoryColors[sat.category] || '#7c3aed' }}>{sat.name}</div>
                 <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{sat.orbitType} · {Math.round(sat.altitude).toLocaleString()} km</div>
               </div>
-              <span className="rank-badge" style={{ fontSize: 10 }}>{sat.category}</span>
+              <span className="rank-badge" style={getCategoryBadgeStyle(sat.category)}>{sat.category}</span>
             </div>
           </div>
         ))}
@@ -436,6 +533,8 @@ function ISSPanel() {
   const issPos = useSatelliteStore(s => s.issPosition);
   const satellites = useSatelliteStore(s => s.satellites);
   const setViewTarget = useAppStore(s => s.setViewTarget);
+  const cameraMode = useAppStore(s => s.cameraMode);
+  const setCameraMode = useAppStore(s => s.setCameraMode);
 
   const iss = useMemo(() => satellites.find(s => s.category === 'iss'), [satellites]);
 
@@ -457,6 +556,30 @@ function ISSPanel() {
         <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
           Continuously crewed since November 2, 2000
         </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button
+          className={`btn-secondary ${cameraMode === 'iss-chase' ? 'active' : ''}`}
+          style={{ flex: 1, fontSize: 12 }}
+          onClick={() => setCameraMode('iss-chase')}
+        >
+          🎥 Chase Cam
+        </button>
+        <button
+          className={`btn-secondary ${cameraMode === 'iss-earth' ? 'active' : ''}`}
+          style={{ flex: 1, fontSize: 12 }}
+          onClick={() => setCameraMode('iss-earth')}
+        >
+          🌍 Earth View
+        </button>
+        <button
+          className={`btn-secondary ${cameraMode === 'orbit' || (cameraMode !== 'iss-chase' && cameraMode !== 'iss-earth') ? 'active' : ''}`}
+          style={{ flex: 1, fontSize: 12 }}
+          onClick={() => setCameraMode('orbit')}
+        >
+          🔄 Orbit Cam
+        </button>
       </div>
 
       {issPos && (
@@ -507,6 +630,8 @@ function ISSPanel() {
 function WeatherPanel() {
   const showWeather = useAppStore(s => s.showWeather);
   const toggleLayer = useAppStore(s => s.toggleLayer);
+  const weatherLayerMode = useAppStore(s => s.weatherLayerMode);
+  const setWeatherLayerMode = useAppStore(s => s.setWeatherLayerMode);
 
   return (
     <div>
@@ -515,33 +640,238 @@ function WeatherPanel() {
       </div>
 
       <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Layer Controls</div>
-        {[
-          { label: 'Cloud Cover', key: 'showWeather', active: showWeather, icon: '☁️' },
-        ].map(layer => (
-          <div key={layer.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span>{layer.icon}</span>
-              <span style={{ fontSize: 14 }}>{layer.label}</span>
-            </div>
-            <button
-              className={`btn-icon ${layer.active ? 'active' : ''}`}
-              style={{ width: 36, height: 22, borderRadius: 11, transition: 'all 0.2s' }}
-              onClick={() => toggleLayer(layer.key)}
-            >
-              <div style={{ width: 16, height: 16, borderRadius: '50%', background: layer.active ? '#00d4ff' : '#475569', transition: 'all 0.2s', transform: layer.active ? 'translateX(5px)' : 'translateX(-5px)' }} />
-            </button>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Layer Visibility</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>☁️</span>
+            <span style={{ fontSize: 14 }}>Enable Weather Overlay</span>
           </div>
-        ))}
+          <button
+            className={`btn-icon ${showWeather ? 'active' : ''}`}
+            style={{ width: 36, height: 22, borderRadius: 11, transition: 'all 0.2s' }}
+            onClick={() => toggleLayer('showWeather')}
+          >
+            <div style={{ width: 16, height: 16, borderRadius: '50%', background: showWeather ? '#00d4ff' : '#475569', transition: 'all 0.2s', transform: showWeather ? 'translateX(5px)' : 'translateX(-5px)' }} />
+          </button>
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Visual Mode</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {[
+            { mode: 'clouds', label: 'Real Clouds', icon: '☁️' },
+            { mode: 'temp', label: 'Temperature Map', icon: '🌡️' },
+            { mode: 'pressure', label: 'Pressure Map', icon: '🌀' },
+            { mode: 'wind', label: 'Wind Simulation', icon: '💨' },
+          ].map(opt => (
+            <button
+              key={opt.mode}
+              className={`btn-secondary ${weatherLayerMode === opt.mode ? 'active' : ''}`}
+              style={{
+                padding: '8px 12px',
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                background: weatherLayerMode === opt.mode ? 'rgba(0, 212, 255, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                borderColor: weatherLayerMode === opt.mode ? '#00d4ff' : 'rgba(255, 255, 255, 0.08)',
+                color: weatherLayerMode === opt.mode ? '#00d4ff' : '#cbd5e1'
+              }}
+              onClick={() => setWeatherLayerMode(opt.mode as any)}
+            >
+              <span>{opt.icon}</span>
+              <span>{opt.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="glass-card" style={{ padding: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>🌡️ Global Conditions</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>🌡️ Global Weather Insights</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, color: '#94a3b8' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Active Hurricanes</span><span style={{ color: '#ef4444', fontWeight: 600 }}>0</span></div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tropical Storms</span><span style={{ color: '#f59e0b', fontWeight: 600 }}>2</span></div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Avg Global Temp</span><span style={{ color: '#f1f5f9', fontFamily: 'JetBrains Mono' }}>15.2°C</span></div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   AIRPORT PANEL
+   ================================================================ */
+function AirportPanel() {
+  const selectedCode = useAppStore(s => s.selectedAirportCode);
+  const selectAirport = useAppStore(s => s.selectAirport);
+  const setViewTarget = useAppStore(s => s.setViewTarget);
+
+  const traffic = useMemo(() => {
+    if (!selectedCode) return null;
+    return generateAirportTraffic(selectedCode);
+  }, [selectedCode]);
+
+  if (!traffic) return null;
+
+  return (
+    <div>
+      <div className="panel-header">
+        <div className="panel-title">🛬 Airport Details</div>
+        <button className="btn-icon" onClick={() => selectAirport(null)}>{icons.close}</button>
+      </div>
+
+      <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Outfit', color: '#00d4ff', marginBottom: 4 }}>
+          {traffic.name} ({traffic.code})
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+          <span className="rank-badge">Traffic Score: {traffic.trafficScore}%</span>
+          <span style={{ fontSize: 13, color: '#94a3b8' }}>
+            Lat: {traffic.lat.toFixed(2)}°, Lon: {traffic.lon.toFixed(2)}°
+          </span>
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#00d4ff', marginBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 6 }}>
+          ✈️ Departures
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {traffic.departures.map((dep, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <div>
+                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, color: '#f59e0b', marginRight: 8 }}>{dep.flightNumber}</span>
+                <span style={{ color: '#f1f5f9' }}>{dep.destination?.split(' - ')[0]}</span>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ color: '#94a3b8', marginRight: 8 }}>{dep.time}</span>
+                <span style={{
+                  color: dep.status === 'delayed' ? '#ef4444' :
+                         dep.status === 'departed' ? '#10b981' : '#94a3b8',
+                  textTransform: 'capitalize',
+                  fontWeight: 600
+                }}>{dep.status}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#00d4ff', marginBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 6 }}>
+          🛬 Arrivals
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {traffic.arrivals.map((arr, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <div>
+                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, color: '#7c3aed', marginRight: 8 }}>{arr.flightNumber}</span>
+                <span style={{ color: '#f1f5f9' }}>{arr.origin?.split(' - ')[0]}</span>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ color: '#94a3b8', marginRight: 8 }}>{arr.time}</span>
+                <span style={{
+                  color: arr.status === 'delayed' ? '#ef4444' :
+                         arr.status === 'landed' ? '#10b981' : '#94a3b8',
+                  textTransform: 'capitalize',
+                  fontWeight: 600
+                }}>{arr.status}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button className="btn-primary" style={{ width: '100%' }}
+        onClick={() => setViewTarget({ lat: traffic.lat, lon: traffic.lon, entityId: traffic.code, entityType: 'airport' })}>
+        🎯 Track Airport on Globe
+      </button>
+    </div>
+  );
+}
+
+/* ================================================================
+   HOVER TOOLTIP
+   ================================================================ */
+export function HoverTooltip() {
+  const hoveredId = useAppStore(s => s.hoveredEntityId);
+  const hoveredType = useAppStore(s => s.hoveredEntityType);
+  const aircraft = useFlightStore(s => s.aircraft);
+  const satellites = useSatelliteStore(s => s.satellites);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setCoords({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  const info = useMemo(() => {
+    if (!hoveredId) return null;
+    if (hoveredType === 'aircraft') {
+      const ac = aircraft.find(a => a.id === hoveredId);
+      if (ac) {
+        return {
+          title: ac.callsign,
+          subtitle: `${ac.origin.split(' - ')[0]} ➔ ${ac.destination.split(' - ')[0]}`,
+          details: [
+            { label: 'Airline', value: ac.airline },
+            { label: 'Type', value: ac.aircraftType },
+            { label: 'Alt', value: `${Math.round(ac.altitude)} m` },
+            { label: 'Speed', value: `${Math.round(ac.speed * 3.6)} km/h` }
+          ]
+        };
+      }
+    } else if (hoveredType === 'satellite') {
+      const sat = satellites.find(s => s.id === hoveredId);
+      if (sat) {
+        return {
+          title: sat.name,
+          subtitle: `NORAD: ${sat.noradId} | Cat: ${sat.category}`,
+          details: [
+            { label: 'Orbit', value: sat.orbitType },
+            { label: 'Alt', value: `${Math.round(sat.altitude)} km` },
+            { label: 'Speed', value: `${sat.speed.toFixed(2)} km/s` },
+            { label: 'Inclination', value: `${sat.inclination.toFixed(1)}°` }
+          ]
+        };
+      }
+    }
+    return null;
+  }, [hoveredId, hoveredType, aircraft, satellites]);
+
+  if (!info) return null;
+
+  return (
+    <div
+      className="hover-tooltip glass-card"
+      style={{
+        position: 'fixed',
+        left: coords.x + 15,
+        top: coords.y + 15,
+        zIndex: 9999,
+        pointerEvents: 'none',
+        padding: '12px 16px',
+        maxWidth: 260,
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        backdropFilter: 'blur(8px)',
+        background: 'rgba(15, 23, 42, 0.85)'
+      }}
+    >
+      <div style={{ fontWeight: 800, color: '#00d4ff', fontSize: 14 }}>{info.title}</div>
+      <div style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 6px 0' }}>{info.subtitle}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {info.details.map((d, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+            <span style={{ color: '#64748b' }}>{d.label}</span>
+            <span style={{ color: '#f1f5f9', fontWeight: 600 }}>{d.value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -558,22 +888,26 @@ export function PanelContainer() {
     satellites: <SatellitePanel />,
     iss: <ISSPanel />,
     weather: <WeatherPanel />,
+    airport: <AirportPanel />,
   };
 
   return (
-    <AnimatePresence>
-      {activePanel !== 'none' && panelComponents[activePanel] && (
-        <motion.div
-          className="panel"
-          initial={{ x: 420, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: 420, opacity: 0 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        >
-          {panelComponents[activePanel]}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <>
+      <AnimatePresence>
+        {activePanel !== 'none' && panelComponents[activePanel] && (
+          <motion.div
+            className="panel"
+            initial={{ x: 420, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 420, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+          >
+            {panelComponents[activePanel]}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <HoverTooltip />
+    </>
   );
 }
 

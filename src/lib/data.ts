@@ -1,4 +1,4 @@
-import type { Aircraft, Satellite, SatelliteCategory, Mission, Achievement } from '@/types';
+import type { Aircraft, Satellite, SatelliteCategory, Mission, Achievement, AirportTraffic, FlightSchedule } from '@/types';
 
 /* ================================================================
    ORBITAL MECHANICS — satellite.js wrapper + physics utilities
@@ -67,6 +67,80 @@ export function orbitalVelocity(altitudeKm: number): number {
 // Escape velocity from altitude (km)
 export function escapeVelocity(altitudeKm: number): number {
   return orbitalVelocity(altitudeKm) * Math.sqrt(2);
+}
+
+// Calculate coverage percentage of Earth visible
+export function calculateCoverage(altitudeKm: number): number {
+  const R = 6371; // Earth radius in km
+  return (altitudeKm / (2 * (R + altitudeKm))) * 100;
+}
+
+// Calculate simulated next pass relative to airport
+export function getNextPassTime(satId: string, airportCode: string): string {
+  const seed = satId.charCodeAt(0) + airportCode.charCodeAt(0);
+  const minutes = (seed * 7) % 55 + 5;
+  return `${minutes}m`;
+}
+
+// Generate schedule details for selected airport
+export function generateAirportTraffic(airportCode: string): AirportTraffic {
+  const airport = AIRPORTS[airportCode];
+  if (!airport) {
+    return { code: airportCode, name: 'Unknown', lat: 0, lon: 0, departures: [], arrivals: [], trafficScore: 0 };
+  }
+  const seed = airportCode.charCodeAt(0) + airportCode.charCodeAt(1);
+  const trafficScore = (seed * 3) % 40 + 50; // 50 to 90
+  const flightNumbers = ['AA', 'BA', 'LH', 'EK', 'SQ', 'QF', 'NH', 'AF', 'CX', 'JL'];
+  const statuses: FlightSchedule['status'][] = ['scheduled', 'delayed', 'departed', 'landed'];
+  const departures: FlightSchedule[] = [];
+  const arrivals: FlightSchedule[] = [];
+  const airportKeys = Object.keys(AIRPORTS).filter(k => k !== airportCode);
+
+  for (let i = 0; i < 5; i++) {
+    const depIdx = (seed + i) % flightNumbers.length;
+    const destKey = airportKeys[(seed + i) % airportKeys.length];
+    const destAirport = AIRPORTS[destKey];
+    const hour = (9 + i * 2) % 24;
+    const min = (15 + i * 10) % 60;
+    
+    departures.push({
+      flightNumber: `${flightNumbers[depIdx]}${(seed * i + 100) % 900 + 100}`,
+      airline: flightNumbers[depIdx] === 'AA' ? 'American Airlines' :
+               flightNumbers[depIdx] === 'BA' ? 'British Airways' :
+               flightNumbers[depIdx] === 'LH' ? 'Lufthansa' :
+               flightNumbers[depIdx] === 'EK' ? 'Emirates' : 'Singapore Airlines',
+      time: `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`,
+      destination: `${destKey} - ${destAirport.name}`,
+      status: statuses[(seed + i) % statuses.length],
+    });
+
+    const arrIdx = (seed - i + 10) % flightNumbers.length;
+    const origKey = airportKeys[(seed - i + 10) % airportKeys.length];
+    const origAirport = AIRPORTS[origKey];
+    const arrHour = (10 + i * 2) % 24;
+    const arrMin = (20 + i * 10) % 60;
+    
+    arrivals.push({
+      flightNumber: `${flightNumbers[arrIdx]}${(seed * (i + 1) * 3 + 120) % 900 + 100}`,
+      airline: flightNumbers[arrIdx] === 'AA' ? 'American Airlines' :
+               flightNumbers[arrIdx] === 'BA' ? 'British Airways' :
+               flightNumbers[arrIdx] === 'LH' ? 'Lufthansa' :
+               flightNumbers[arrIdx] === 'EK' ? 'Emirates' : 'Singapore Airlines',
+      time: `${arrHour.toString().padStart(2, '0')}:${arrMin.toString().padStart(2, '0')}`,
+      origin: `${origKey} - ${origAirport.name}`,
+      status: statuses[(seed - i + 5) % statuses.length],
+    });
+  }
+
+  return {
+    code: airportCode,
+    name: airport.name,
+    lat: airport.lat,
+    lon: airport.lon,
+    departures,
+    arrivals,
+    trafficScore,
+  };
 }
 
 /* ================================================================
@@ -444,14 +518,37 @@ const TUTOR_TOPICS: TutorTopic[] = [
   },
 ];
 
-export function getAITutorResponse(query: string, mode: string): string {
+export function getAITutorResponse(query: string, mode: string): { content: string; globeAction?: { command: 'highlight' | 'fly-to' | 'orbit-view'; targetId?: string; targetType?: 'aircraft' | 'satellite' | 'airport' | 'coordinate'; lat?: number; lon?: number } } {
   const q = query.toLowerCase();
+  
+  let globeAction: { command: 'highlight' | 'fly-to' | 'orbit-view'; targetId?: string; targetType?: 'aircraft' | 'satellite' | 'airport' | 'coordinate'; lat?: number; lon?: number } | undefined = undefined;
+  
+  if (q.includes('iss') || q.includes('space station')) {
+    globeAction = { command: 'fly-to', targetId: 'ISS', targetType: 'satellite', lat: 0, lon: 0 };
+  } else if (q.includes('starlink')) {
+    globeAction = { command: 'highlight', targetId: 'STARLINK-0', targetType: 'satellite' };
+  } else if (q.includes('gps') || q.includes('navigation') || q.includes('positioning')) {
+    globeAction = { command: 'highlight', targetId: 'GPS-0', targetType: 'satellite' };
+  } else if (q.includes('orbit')) {
+    globeAction = { command: 'orbit-view' };
+  } else if (q.includes('weather') || q.includes('cloud') || q.includes('storm')) {
+    globeAction = { command: 'highlight', targetId: 'GOES-0', targetType: 'satellite' };
+  } else if (q.includes('rocket') || q.includes('launch')) {
+    globeAction = { command: 'fly-to', lat: 28.5721, lon: -80.648, targetType: 'coordinate' }; // Cape Canaveral
+  }
+
   for (const topic of TUTOR_TOPICS) {
     if (topic.keywords.some(kw => q.includes(kw))) {
-      return topic.responses[mode] || topic.responses.student;
+      return {
+        content: topic.responses[mode] || topic.responses.student,
+        globeAction,
+      };
     }
   }
-  return mode === 'kids'
+  
+  const fallback = mode === 'kids'
     ? '🤔 That\'s a great question! Try asking me about orbits, satellites, the ISS, GPS, weather, or rockets — I know lots about space!'
     : `That's an interesting question about "${query}". Try asking me about orbital mechanics, satellite systems, the ISS, GPS navigation, weather satellites, or rocket propulsion — these are my areas of expertise. You can also start an educational mission from the Missions panel to learn interactively!`;
+  
+  return { content: fallback, globeAction };
 }

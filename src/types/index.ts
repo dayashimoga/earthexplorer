@@ -119,19 +119,44 @@ export interface UserProgress {
 
 /* ===== UI STATE ===== */
 
-export type ActivePanel = 'none' | 'flights' | 'satellites' | 'iss' | 'weather' | 'missions' | 'labs' | 'academy' | 'achievements';
+export type ActivePanel = 'none' | 'flights' | 'satellites' | 'iss' | 'weather' | 'missions' | 'labs' | 'academy' | 'achievements' | 'airport';
 
-export type CameraMode = 'orbit' | 'fly-to' | 'follow-aircraft' | 'follow-satellite' | 'iss-view' | 'cockpit';
+export type CameraMode = 'orbit' | 'fly-to' | 'follow-aircraft' | 'follow-satellite' | 'iss-view' | 'cockpit' | 'iss-chase' | 'iss-earth';
 
 export interface ViewTarget {
   lat: number;
   lon: number;
   alt?: number;
   entityId?: string;
-  entityType?: 'aircraft' | 'satellite';
+  entityType?: 'aircraft' | 'satellite' | 'airport';
 }
 
-/* ===== AI TUTOR ===== */
+/* ===== AIRPORT TRAFFIC TYPES ===== */
+
+export interface FlightSchedule {
+  flightNumber: string;
+  airline: string;
+  time: string;
+  destination?: string;
+  origin?: string;
+  status: 'scheduled' | 'delayed' | 'departed' | 'landed';
+}
+
+export interface AirportTraffic {
+  code: string;
+  name: string;
+  lat: number;
+  lon: number;
+  departures: FlightSchedule[];
+  arrivals: FlightSchedule[];
+  trafficScore: number;
+}
+
+/* ===== WEATHER SYSTEM TYPES ===== */
+
+export type WeatherLayerMode = 'clouds' | 'temp' | 'pressure' | 'wind';
+
+/* ===== AI TUTOR SYSTEM ===== */
 
 export type TutorMode = 'kids' | 'student' | 'enthusiast' | 'expert';
 
@@ -140,6 +165,38 @@ export interface TutorMessage {
   role: 'user' | 'tutor';
   content: string;
   timestamp: number;
+  globeAction?: {
+    command: 'highlight' | 'fly-to' | 'orbit-view';
+    targetId?: string;
+    targetType?: 'aircraft' | 'satellite' | 'airport' | 'coordinate';
+    lat?: number;
+    lon?: number;
+  };
+}
+
+/* ===== VALIDATION REPORT TYPES ===== */
+
+export interface ValidationReport {
+  timestamp: number;
+  fps: number;
+  elements: {
+    earth: boolean;
+    atmosphere: boolean;
+    clouds: boolean;
+    flightsCount: number;
+    satellitesCount: number;
+    weatherLayers: boolean;
+  };
+  education: {
+    missionsOk: boolean;
+    labsOk: boolean;
+    tutorOk: boolean;
+  };
+  performance: {
+    score: number;
+    memoryLimitRespected: boolean;
+  };
+  status: 'passed' | 'failed';
 }
 
 /* ===== API TYPES ===== */
