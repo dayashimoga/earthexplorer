@@ -345,11 +345,41 @@ html, body {
 .float { animation: float 3s ease-in-out infinite; }
 
 /* ===== RESPONSIVE ===== */
+.hud-badges-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 2px 0;
+  pointer-events: auto;
+}
+.hud-badges-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .sidebar { width: 56px; }
   .panel { width: 100%; }
-  .hud-top { left: 68px; }
+  .hud-top {
+    left: 68px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .hud-badges-scroll {
+    width: 100%;
+  }
   .status-bar { left: 56px; }
+
+  /* Shift layers menu and simulation controls to fit mobile screens cleanly */
+  .layers-toggle-btn, .layers-popover {
+    left: 68px !important;
+  }
+  .layers-popover {
+    max-width: 280px !important;
+    bottom: 110px !important;
+  }
 }
 
 /* ===== CUSTOM APP STYLING UPGRADES ===== */

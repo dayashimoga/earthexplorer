@@ -162,20 +162,22 @@ export function HUD() {
           </div>
         )}
       </div>
-      <div className="hud-badge" style={{ color: '#00d4ff' }}>
-        <span>✈️</span> {aircraft.length}
-      </div>
-      <div className="hud-badge" style={{ color: '#7c3aed' }}>
-        <span>🛰️</span> {satellites.length}
-      </div>
-      <div className="hud-badge" style={{ color: '#f59e0b' }}>
-        <span>⭐</span> L{userLevel}
-      </div>
-      <div className="hud-badge" style={{ color: '#10b981' }}>
-        <span>🔥</span> {streak}d
-      </div>
-      <div className="hud-badge" style={{ color: '#00d4ff' }}>
-        <span style={{ fontSize: 11 }}>XP</span> {userXP.toLocaleString()}
+      <div className="hud-badges-scroll">
+        <div className="hud-badge" style={{ color: '#00d4ff' }}>
+          <span>✈️</span> {aircraft.length}
+        </div>
+        <div className="hud-badge" style={{ color: '#7c3aed' }}>
+          <span>🛰️</span> {satellites.length}
+        </div>
+        <div className="hud-badge" style={{ color: '#f59e0b' }}>
+          <span>⭐</span> L{userLevel}
+        </div>
+        <div className="hud-badge" style={{ color: '#10b981' }}>
+          <span>🔥</span> {streak}d
+        </div>
+        <div className="hud-badge" style={{ color: '#00d4ff' }}>
+          <span style={{ fontSize: 11 }}>XP</span> {userXP.toLocaleString()}
+        </div>
       </div>
     </div>
   );

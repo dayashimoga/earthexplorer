@@ -266,6 +266,8 @@ function LayerToggles() {
   const showHeatmap = useAppStore(s => s.showHeatmap);
   const isRealtimeData = useAppStore(s => s.isRealtimeData);
 
+  const [isOpen, setIsOpen] = React.useState(false);
+
   const layers = [
     { key: 'showFlights', label: 'Flights', icon: '✈️', active: showFlights },
     { key: 'showSatellites', label: 'Satellites', icon: '🛰️', active: showSatellites },
@@ -279,31 +281,81 @@ function LayerToggles() {
     { key: 'isRealtimeData', label: 'Realtime Data', icon: '📡', active: isRealtimeData },
   ];
 
+  // Auto close menu when clicking outside
+  useEffect(() => {
+    if (!isOpen) return;
+    const clickAway = () => setIsOpen(false);
+    window.addEventListener('click', clickAway);
+    return () => window.removeEventListener('click', clickAway);
+  }, [isOpen]);
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); setIsOpen(true); }}
+        style={{
+          position: 'fixed', bottom: 48, left: 84, zIndex: 80,
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '10px 16px', borderRadius: 14, border: 'none', cursor: 'pointer',
+          fontSize: 13, fontWeight: 700, fontFamily: 'Inter, sans-serif',
+          background: 'rgba(15, 23, 42, 0.85)', color: '#00d4ff',
+          backdropFilter: 'blur(20px)', border: '1px solid rgba(0, 212, 255, 0.3)',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)', transition: 'all 0.2s ease',
+        }}
+        className="layers-toggle-btn"
+      >
+        <span style={{ fontSize: 16 }}>🥞</span>
+        <span>Layers</span>
+      </button>
+    );
+  }
+
   return (
-    <div style={{
-      position: 'fixed', bottom: 48, left: 84, zIndex: 80,
-      display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 450,
-    }}>
-      {layers.map(l => (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed', bottom: 48, left: 84, zIndex: 85,
+        display: 'flex', flexDirection: 'column', gap: 10,
+        padding: 16, borderRadius: 16, maxWidth: 360, width: 'calc(100% - 100px)',
+        background: 'rgba(15, 23, 42, 0.9)', backdropFilter: 'blur(24px)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+        animation: 'fadeIn 0.2s ease-out',
+      }}
+      className="layers-popover"
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>🗺️ Map Layers</span>
         <button
-          key={l.key}
-          onClick={() => toggleLayer(l.key)}
+          onClick={() => setIsOpen(false)}
           style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '6px 12px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            fontSize: 12, fontWeight: 500, fontFamily: 'Inter, sans-serif',
-            background: l.active ? 'rgba(0, 212, 255, 0.15)' : 'rgba(15, 23, 42, 0.7)',
-            color: l.active ? '#00d4ff' : '#64748b',
-            backdropFilter: 'blur(12px)',
-            borderWidth: 1, borderStyle: 'solid',
-            borderColor: l.active ? 'rgba(0, 212, 255, 0.3)' : 'rgba(255,255,255,0.06)',
-            transition: 'all 0.2s ease',
+            background: 'transparent', border: 'none', color: '#94a3b8',
+            cursor: 'pointer', fontSize: 14, fontWeight: 700, padding: 4
           }}
-        >
-          <span style={{ fontSize: 14 }}>{l.icon}</span>
-          {l.label}
-        </button>
-      ))}
+        >✕</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        {layers.map(l => (
+          <button
+            key={l.key}
+            onClick={() => toggleLayer(l.key)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 10px', borderRadius: 10, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 500, fontFamily: 'Inter, sans-serif',
+              background: l.active ? 'rgba(0, 212, 255, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+              color: l.active ? '#00d4ff' : '#94a3b8',
+              borderWidth: 1, borderStyle: 'solid',
+              borderColor: l.active ? 'rgba(0, 212, 255, 0.3)' : 'rgba(255,255,255,0.04)',
+              transition: 'all 0.2s ease',
+              textAlign: 'left',
+            }}
+          >
+            <span style={{ fontSize: 13 }}>{l.icon}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
