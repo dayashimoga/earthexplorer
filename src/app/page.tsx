@@ -296,7 +296,7 @@ function LayerToggles() {
         style={{
           position: 'fixed', bottom: 48, left: 84, zIndex: 80,
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '10px 16px', borderRadius: 14, border: 'none', cursor: 'pointer',
+          padding: '10px 16px', borderRadius: 14, cursor: 'pointer',
           fontSize: 13, fontWeight: 700, fontFamily: 'Inter, sans-serif',
           background: 'rgba(15, 23, 42, 0.85)', color: '#00d4ff',
           backdropFilter: 'blur(20px)', border: '1px solid rgba(0, 212, 255, 0.3)',
